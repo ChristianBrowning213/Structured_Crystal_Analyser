@@ -1,0 +1,3792 @@
+# PROJECT CONTEXT DUMP
+# Root: C:\Users\brown\Documents\GitHub\Structured_Crystal_Analyser
+# Generated: 2026-06-17 13:43:00
+# Notes: Hidden paths and common junk/binaries are skipped. Sizes > max-size are skipped.
+# Notes: .gitignore rules are applied (unless --no-gitignore).
+#
+# Included files will follow with clear section headers.
+
+
+
+================================================================================
+=== FILE: project_context.txt ===
+================================================================================
+
+```
+
+```
+
+
+================================================================================
+=== FILE: project_to_txt.py ===
+================================================================================
+
+```python
+#!/usr/bin/env python3
+from __future__ import annotations  # ← must be here (first statement)
+
+import argparse, os, sys, time, io
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+
+
+DEFAULT_EXCLUDED_DIRS = {
+    ".git", ".hg", ".svn", ".idea", ".vscode", ".venv",
+    "__pycache__", "node_modules", "dist", "build", ".cache",
+    ".mypy_cache", ".pytest_cache", ".next", ".turbo", ".parcel-cache"
+}
+DEFAULT_EXCLUDED_EXTS = {
+    # archives & binaries
+    ".zip", ".gz", ".bz2", ".xz", ".7z", ".rar", ".tar",
+    ".exe", ".dll", ".so", ".dylib", ".bin", ".dat", ".lock",
+    # media
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".svg",
+    ".mp4", ".mov", ".avi", ".mkv", ".mp3", ".wav", ".flac",
+    # docs likely huge or non-text
+    ".pdf", ".psd", ".ai"
+}
+DEFAULT_EXCLUDED_FILES = {
+    # huge / noisy lock or cache files (still text, but not helpful)
+    "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
+    "poetry.lock", "pipfile.lock", ".DS_Store", "Thumbs.db"
+}
+
+LANG_BY_EXT = {
+    ".py": "python", ".js": "javascript", ".ts": "typescript",
+    ".tsx": "tsx", ".jsx": "jsx", ".json": "json", ".yml": "yaml",
+    ".yaml": "yaml", ".md": "markdown", ".toml": "toml",
+    ".ini": "", ".cfg": "", ".conf": "", ".txt": "",
+    ".html": "html", ".css": "css", ".scss": "scss", ".sass": "sass",
+    ".sh": "bash", ".ps1": "powershell", ".sql": "sql", ".xml": "xml",
+    ".java": "java", ".c": "c", ".h": "c", ".cpp": "cpp", ".hpp": "cpp",
+    ".rs": "rust", ".go": "go", ".rb": "ruby", ".php": "php",
+    ".ipynb": "json"
+}
+
+
+def looks_binary(sample: bytes) -> bool:
+    if b"\x00" in sample:
+        return True
+    # Heuristic: if >30% bytes are non-text-ish, treat as binary
+    text_bytes = b"\t\n\r\f\b" + bytes(range(32, 127))
+    if not sample:
+        return False
+    nontext = sum(ch not in text_bytes for ch in sample)
+    return (nontext / len(sample)) > 0.30
+
+
+def read_text_file(path: Path, max_bytes: int) -> Optional[str]:
+    try:
+        with path.open("rb") as f:
+            sample = f.read(min(max_bytes, 4096))
+            if looks_binary(sample):
+                return None
+        with path.open("rb") as f:
+            data = f.read(max_bytes)
+        text = data.decode("utf-8", errors="replace")
+        return text.replace("\r\n", "\n").replace("\r", "\n")
+    except Exception:
+        return None
+
+
+def is_hidden(p: Path) -> bool:
+    # Treat names starting with '.' as hidden (works cross-platform)
+    return any(part.startswith(".") and part not in {".", ".."} for part in p.parts)
+
+
+# ----------------------------
+# .gitignore support (lightweight)
+# ----------------------------
+
+@dataclass(frozen=True)
+class GitIgnoreRule:
+    base: Path         # directory containing the .gitignore file
+    pattern: str       # normalized pattern
+    negated: bool      # True if pattern starts with !
+    dir_only: bool     # True if pattern ends with /
+
+
+def _parse_gitignore_file(gitignore_path: Path) -> list[GitIgnoreRule]:
+    rules: list[GitIgnoreRule] = []
+    base = gitignore_path.parent
+
+    try:
+        raw = gitignore_path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return rules
+
+    for line in raw.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+
+        negated = s.startswith("!")
+        if negated:
+            s = s[1:].strip()
+            if not s:
+                continue
+
+        # Minimal support for escaping leading # or !
+        if s.startswith(r"\#") or s.startswith(r"\!"):
+            s = s[1:]
+
+        dir_only = s.endswith("/")
+        if dir_only:
+            s = s[:-1].strip()
+            if not s:
+                continue
+
+        # Normalize separators for Path.match
+        s = s.replace("\\", "/")
+
+        rules.append(GitIgnoreRule(base=base, pattern=s, negated=negated, dir_only=dir_only))
+
+    return rules
+
+
+def _rule_matches(rule: GitIgnoreRule, target_abs: Path, is_dir: bool) -> bool:
+    """
+    Good-enough .gitignore matcher:
+      - patterns without '/' match basename anywhere
+      - patterns with '/' are path patterns relative to the .gitignore base
+        * if not anchored (no leading '/'), they can match anywhere => also try '**/pat'
+      - trailing '/' (dir_only) already handled at caller
+      - negation handled in is_ignored_by_gitignore (last match wins)
+    """
+    if rule.dir_only and not is_dir:
+        return False
+
+    try:
+        rel_to_base = target_abs.relative_to(rule.base)
+    except Exception:
+        return False
+
+    rel_posix = rel_to_base.as_posix()
+    pat = rule.pattern
+
+    # Path pattern
+    if "/" in pat:
+        anchored = pat.startswith("/")
+        pat2 = pat.lstrip("/") if anchored else pat
+
+        # direct match
+        if Path(rel_posix).match(pat2) or rel_posix == pat2:
+            return True
+
+        if anchored:
+            return False
+
+        # non-anchored path patterns can match anywhere under base (key fix)
+        if Path(rel_posix).match(f"**/{pat2}"):
+            return True
+
+        # small helper for non-glob literal patterns
+        if not any(ch in pat2 for ch in "*?[]"):
+            if rel_posix.endswith("/" + pat2):
+                return True
+
+        return False
+
+    # Basename pattern
+    return Path(target_abs.name).match(pat)
+
+
+def is_ignored_by_gitignore(
+    root: Path,
+    target_abs: Path,
+    is_dir: bool,
+    rules_by_dir: dict[Path, list[GitIgnoreRule]],
+) -> bool:
+    """
+    Apply .gitignore from root -> target parent directory.
+    Last match wins; negation un-ignores.
+    """
+    context_dir = target_abs if is_dir else target_abs.parent
+    if root != context_dir and root not in context_dir.parents:
+        return False
+
+    chain: list[Path] = []
+    cur = context_dir
+    while True:
+        chain.append(cur)
+        if cur == root:
+            break
+        cur = cur.parent
+    chain.reverse()
+
+    ignored = False
+    for d in chain:
+        rules = rules_by_dir.get(d)
+        if not rules:
+            continue
+        for r in rules:
+            if _rule_matches(r, target_abs, is_dir):
+                ignored = not r.negated
+
+    return ignored
+
+
+def ensure_gitignore_loaded_for_dir(
+    dirpath: Path,
+    rules_by_dir: dict[Path, list[GitIgnoreRule]],
+    cache: dict[Path, list[GitIgnoreRule]],
+) -> None:
+    """
+    If dirpath/.gitignore exists, parse once and attach rules to that dir.
+    """
+    gi = dirpath / ".gitignore"
+    if gi.exists() and gi.is_file() and gi not in cache:
+        cache[gi] = _parse_gitignore_file(gi)
+        rules_by_dir[dirpath] = cache[gi]
+
+
+# ----------------------------
+# Skip logic
+# ----------------------------
+
+def should_skip_file(p: Path, args, rel: Path, root: Path, rules_by_dir: dict[Path, list[GitIgnoreRule]]) -> bool:
+    name = p.name
+
+    if not args.include_dotfiles and (name.startswith(".") or is_hidden(rel)):
+        return True
+
+    # .gitignore
+    if args.use_gitignore and is_ignored_by_gitignore(
+        root=root,
+        target_abs=p,
+        is_dir=False,
+        rules_by_dir=rules_by_dir,
+    ):
+        return True
+
+    if name in args.exclude_files or name in DEFAULT_EXCLUDED_FILES:
+        return True
+
+    ext = p.suffix.lower()
+    if ext in DEFAULT_EXCLUDED_EXTS or ext in args.exclude_exts:
+        return True
+    if args.include_exts and ext not in args.include_exts:
+        return True
+
+    try:
+        size = p.stat().st_size
+        if size > args.max_size_mb * 1024 * 1024:
+            return True
+    except Exception:
+        return True
+
+    return False
+
+
+def should_skip_dir(dirpath: Path, args, rel: Path, root: Path, rules_by_dir: dict[Path, list[GitIgnoreRule]]) -> bool:
+    name = dirpath.name
+
+    if not args.include_dotfiles and (name.startswith(".") or is_hidden(rel)):
+        return True
+
+    # .gitignore
+    if args.use_gitignore and is_ignored_by_gitignore(
+        root=root,
+        target_abs=dirpath,
+        is_dir=True,
+        rules_by_dir=rules_by_dir,
+    ):
+        return True
+
+    if name in DEFAULT_EXCLUDED_DIRS or name in args.exclude_dirs:
+        return True
+
+    return False
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Concatenate a project’s text source into one TXT for agent context."
+    )
+    ap.add_argument("root", help="Project root directory.")
+    ap.add_argument(
+        "-o", "--output", default="project_context.txt",
+        help="Output TXT path (default: project_context.txt)"
+    )
+    ap.add_argument(
+        "--max-size-mb", type=int, default=2,
+        help="Skip files larger than this many MB (default: 2)"
+    )
+    ap.add_argument(
+        "--include-dotfiles", action="store_true",
+        help="Include dotfiles and hidden paths (default: skip)"
+    )
+    ap.add_argument(
+        "--include-exts", default="",
+        help="Comma-separated whitelist of extensions (e.g., .py,.md)"
+    )
+    ap.add_argument(
+        "--exclude-exts", default="",
+        help="Comma-separated extra excluded extensions (e.g., .log,.csv)"
+    )
+    ap.add_argument(
+        "--exclude-dirs", default="",
+        help="Comma-separated extra excluded dir names (exact match)"
+    )
+    ap.add_argument(
+        "--exclude-files", default="",
+        help="Comma-separated extra excluded file names (exact match)"
+    )
+    ap.add_argument(
+        "--no-fences", action="store_true",
+        help="Do not wrap contents in Markdown code fences."
+    )
+    ap.add_argument(
+        "--no-gitignore", action="store_true",
+        help="Do NOT read .gitignore files (default: use them)."
+    )
+
+    args = ap.parse_args()
+
+    root = Path(args.root).resolve()
+    if not root.exists() or not root.is_dir():
+        print(f"Error: {root} is not a directory.", file=sys.stderr)
+        sys.exit(1)
+
+    # Parse lists
+    args.include_exts = {e.strip().lower() for e in args.include_exts.split(",") if e.strip()} if args.include_exts else set()
+    args.exclude_exts = {e.strip().lower() for e in args.exclude_exts.split(",") if e.strip()} if args.exclude_exts else set()
+    args.exclude_dirs = {d.strip() for d in args.exclude_dirs.split(",") if d.strip()} if args.exclude_dirs else set()
+    args.exclude_files = {f.strip() for f in args.exclude_files.split(",") if f.strip()} if args.exclude_files else set()
+
+    args.use_gitignore = not args.no_gitignore
+
+    included_files: list[str] = []
+    skipped = {"dir": 0, "hidden": 0, "size": 0, "binary": 0, "ext": 0, "other": 0, "gitignore": 0}
+
+    out_path = Path(args.output).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # gitignore caches
+    gitignore_cache: dict[Path, list[GitIgnoreRule]] = {}
+    rules_by_dir: dict[Path, list[GitIgnoreRule]] = {}
+
+    # load root .gitignore if present
+    ensure_gitignore_loaded_for_dir(root, rules_by_dir, gitignore_cache)
+
+    with io.open(out_path, "w", encoding="utf-8", newline="\n") as out:
+        # Header / manifest preface
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        out.write("# PROJECT CONTEXT DUMP\n")
+        out.write(f"# Root: {root}\n# Generated: {ts}\n")
+        out.write("# Notes: Hidden paths and common junk/binaries are skipped. Sizes > max-size are skipped.\n")
+        out.write("# Notes: .gitignore rules are applied (unless --no-gitignore).\n")
+        out.write("#\n# Included files will follow with clear section headers.\n\n")
+
+        # Walk
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirpath = Path(dirpath)
+            rel_dir = dirpath.relative_to(root)
+
+            # If this directory has a .gitignore, load it once
+            if args.use_gitignore:
+                ensure_gitignore_loaded_for_dir(dirpath, rules_by_dir, gitignore_cache)
+
+            # Filter directories in-place (os.walk respects modifications)
+            keep_dirs = []
+            for d in dirnames:
+                dpath = dirpath / d
+                rel = rel_dir / d
+
+                if args.use_gitignore and is_ignored_by_gitignore(root, dpath, True, rules_by_dir):
+                    skipped["gitignore"] += 1
+                    continue
+
+                if should_skip_dir(dpath, args, rel, root, rules_by_dir):
+                    skipped["dir"] += 1
+                    continue
+
+                keep_dirs.append(d)
+            dirnames[:] = keep_dirs
+
+            # Files
+            for fn in filenames:
+                fpath = dirpath / fn
+                rel = fpath.relative_to(root)
+
+                if args.use_gitignore and is_ignored_by_gitignore(root, fpath, False, rules_by_dir):
+                    skipped["gitignore"] += 1
+                    continue
+
+                if should_skip_file(fpath, args, rel, root, rules_by_dir):
+                    # heuristic reason counting (best-effort)
+                    name = fpath.name
+                    if not args.include_dotfiles and (name.startswith(".") or is_hidden(rel)):
+                        skipped["hidden"] += 1
+                    elif fpath.suffix.lower() in DEFAULT_EXCLUDED_EXTS or fpath.suffix.lower() in args.exclude_exts:
+                        skipped["ext"] += 1
+                    else:
+                        try:
+                            if fpath.stat().st_size > args.max_size_mb * 1024 * 1024:
+                                skipped["size"] += 1
+                            else:
+                                skipped["other"] += 1
+                        except Exception:
+                            skipped["other"] += 1
+                    continue
+
+                # Read and binary check
+                with fpath.open("rb") as fb:
+                    sample = fb.read(4096)
+                if looks_binary(sample):
+                    skipped["binary"] += 1
+                    continue
+
+                text = read_text_file(fpath, max_bytes=args.max_size_mb * 1024 * 1024)
+                if text is None:
+                    skipped["other"] += 1
+                    continue
+
+                included_files.append(str(rel))
+
+                # Write section
+                lang = LANG_BY_EXT.get(fpath.suffix.lower(), "")
+                out.write("\n\n" + "=" * 80 + "\n")
+                out.write(f"=== FILE: {rel} ===\n")
+                out.write("=" * 80 + "\n\n")
+                if args.no_fences:
+                    out.write(text)
+                else:
+                    fence = lang if lang is not None else ""
+                    out.write(f"```{fence}\n{text}\n```\n")
+
+        # Manifest footer
+        out.write("\n\n" + "#" * 80 + "\n")
+        out.write("# MANIFEST\n")
+        out.write("# Included files:\n")
+        for p in included_files:
+            out.write(f"#  - {p}\n")
+        out.write("#\n# Skips summary:\n")
+        for k, v in skipped.items():
+            out.write(f"#  {k}: {v}\n")
+        out.write("# END\n")
+
+    print(f"Done. Wrote: {out_path}")
+    print(f"Included files: {len(included_files)} | Skips: {skipped}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+
+================================================================================
+=== FILE: pyproject.toml ===
+================================================================================
+
+```toml
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sca"
+version = "0.1.0"
+description = "Structured Crystal Analyser: internal tools for evaluating crystal structures."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "Structured Crystal Analyser contributors" }
+]
+dependencies = [
+  "pandas>=2.0",
+  "pydantic>=2.0",
+  "pymatgen>=2024.0",
+  "rich>=13.0",
+  "tqdm>=4.60",
+  "typer>=0.12"
+]
+
+[project.optional-dependencies]
+alignn = [
+  "alignn>=2024.0"
+]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.5"
+]
+
+[project.scripts]
+sca = "sca.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["sca*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+```
+
+
+================================================================================
+=== FILE: README.md ===
+================================================================================
+
+```markdown
+# SCA — Structured Crystal Analyser
+
+## Purpose
+
+SCA is an internal Python toolkit for pre-DFT evaluation of generated crystal structures. It is designed for comparing text-to-crystal workflows against CrystaLLM-style generated-structure evaluation before any expensive first-principles calculations.
+
+## Install
+
+```bash
+pip install -e .
+```
+
+For development:
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q
+```
+
+ALIGNN is optional. Install it only when surrogate formation-energy scoring is needed:
+
+```bash
+pip install alignn
+```
+
+## CrystaLLM-Style Pre-DFT Evaluation
+
+The `crystallm-eval` pipeline checks:
+
+- CIF parse/processability
+- composition and target formula consistency
+- declared, detected, and target space-group consistency
+- atom-site multiplicity consistency when explicit CIF multiplicities exist
+- bond/contact reasonableness
+- volume, density, and lattice geometry warnings
+- duplicate grouping with `StructureMatcher`
+- novelty/rediscovery against an optional reference corpus
+- optional ALIGNN formation-energy scoring
+
+SCA does not run DFT and does not compute real energy above hull.
+
+## CLI Usage
+
+Single CIF:
+
+```bash
+sca crystallm-eval one examples/cifs/tiny_valid.cif \
+  --target-formula NaCl \
+  --target-space-group 1 \
+  --out reports/one.json \
+  --require-spacegroup false \
+  --alignn false
+```
+
+Folder:
+
+```bash
+sca crystallm-eval folder examples/cifs \
+  --target-formula NaCl \
+  --out reports/pre_dft_eval.csv \
+  --jsonl reports/pre_dft_eval.jsonl \
+  --require-spacegroup false \
+  --alignn false
+```
+
+Manifest:
+
+```bash
+sca crystallm-eval manifest manifests/generated_candidates.csv \
+  --path-col cif_path \
+  --formula-col target_formula \
+  --spacegroup-col target_space_group \
+  --method-col method \
+  --query-id-col query_id \
+  --alignn true \
+  --out reports/pre_dft_eval.csv \
+  --jsonl reports/pre_dft_eval.jsonl
+```
+
+Manifest with novelty checking against a reference CIF folder:
+
+```bash
+sca crystallm-eval manifest manifests/generated_candidates.csv \
+  --path-col cif_path \
+  --formula-col target_formula \
+  --spacegroup-col target_space_group \
+  --method-col method \
+  --query-id-col query_id \
+  --novelty true \
+  --reference-folder data/reference_mp_subset \
+  --alignn false \
+  --out reports/pre_dft_eval.csv \
+  --jsonl reports/pre_dft_eval.jsonl
+```
+
+Novelty can also load references from a manifest:
+
+```bash
+sca crystallm-eval folder examples/cifs \
+  --novelty true \
+  --reference-manifest data/reference_manifest.csv \
+  --reference-path-col cif_path \
+  --reference-id-col material_id \
+  --out reports/pre_dft_eval.csv \
+  --jsonl reports/pre_dft_eval.jsonl
+```
+
+Summarize:
+
+```bash
+sca summarize reports/pre_dft_eval.csv \
+  --group-col method \
+  --out reports/pre_dft_summary_by_method.csv
+```
+
+Select top-k candidates for later DFT:
+
+```bash
+sca select-top-k reports/pre_dft_eval.csv \
+  --group-cols method,query_id \
+  --k 5 \
+  --out reports/top5_for_dft.csv
+```
+
+The original ALIGNN-only commands remain available under `sca alignn`.
+
+## Python Library Usage
+
+```python
+from sca.pipelines.crystallm_style import evaluate_one_cif
+
+record, structure = evaluate_one_cif(
+    "examples/cifs/tiny_valid.cif",
+    target_formula="NaCl",
+    target_space_group="1",
+    require_spacegroup=False,
+    run_alignn=False,
+)
+print(record.model_dump())
+```
+
+Batch helpers:
+
+```python
+from sca.batch import evaluate_manifest
+
+records = evaluate_manifest(
+    "examples/cif_manifest.csv",
+    path_col="cif_path",
+    formula_col="target_formula",
+    spacegroup_col="target_space_group",
+    method_col="method",
+    query_id_col="query_id",
+)
+```
+
+## Manifest Format
+
+A manifest CSV can include:
+
+```csv
+cif_path,target_formula,target_space_group,method,query_id
+cifs/tiny_valid.cif,NaCl,1,crystallm,q001
+```
+
+`cif_path` is required by default. Relative paths are resolved relative to the manifest file.
+
+## Output Columns
+
+Reports include per-CIF fields for:
+
+- identity: `run_id`, `method`, `query_id`, `input_path`, `file_name`
+- parsing and composition: `parse_ok`, `formula`, `reduced_formula`, `target_formula`, `target_formula_match`
+- symmetry: `declared_space_group`, `detected_space_group`, `target_space_group`, `space_group_consistent`
+- multiplicity: `multiplicity_checked`, `multiplicity_consistent`
+- bonds and geometry: `bond_reasonableness_score`, `bond_lengths_reasonable`, `min_distance`, `num_bad_contacts`, `volume`, `volume_per_atom`, `density`, `geometry_ok`
+- uniqueness and novelty: `duplicate_group_id`, `is_duplicate`, `is_unique_representative`, `novelty_checked`, `nearest_reference_id`, `known_match`, `novel_by_structure_matcher`, `novelty_error`
+- optional ALIGNN: `alignn_ok`, `alignn_model`, `formation_energy_per_atom`
+- workflow fields: `pre_dft_valid`, `pre_dft_rank_score`, `selected_for_dft`, `error_type`, `error_message`
+
+## ALIGNN Caveat
+
+ALIGNN formation energy is a surrogate pre-DFT prediction. It is not DFT, not a relaxed energy, and not energy above the convex hull.
+
+If the installed ALIGNN Python API is incompatible, configure a subprocess fallback with `SCA_ALIGNN_COMMAND`. The command may use `{input}` for a temporary POSCAR path and `{model}` for the model name.
+
+```bash
+export SCA_ALIGNN_COMMAND="python -m alignn.scripts.pretrained --model {model} --file {input}"
+```
+
+## Top-K Selection For Later DFT
+
+`select-top-k` sorts by `pre_dft_rank_score` within each requested group and writes selected rows only, setting `selected_for_dft=true` in the output. Lower scores are better. Failed parses, formula mismatches, bad contacts, geometry failures, multiplicity inconsistencies, and duplicate non-representatives are penalized.
+
+## Roadmap
+
+- CHGNet and M3GNet surrogate evaluators
+- richer pymatgen validity checks
+- configurable novelty corpora
+- optional Materials Project integration
+- hull analysis after real DFT data exists
+
+```
+
+
+================================================================================
+=== FILE: requirements-dev.txt ===
+================================================================================
+
+```
+-r requirements.txt
+pytest>=8.0
+ruff>=0.5
+
+```
+
+
+================================================================================
+=== FILE: requirements.txt ===
+================================================================================
+
+```
+pandas>=2.0
+pydantic>=2.0
+pymatgen>=2024.0
+rich>=13.0
+tqdm>=4.60
+typer>=0.12
+
+# Optional runtime dependency for real ALIGNN predictions:
+# alignn>=2024.0
+
+```
+
+
+================================================================================
+=== FILE: examples\cif_manifest.csv ===
+================================================================================
+
+```
+cif_path,target_formula,target_space_group,method,query_id
+cifs/tiny_valid.cif,NaCl,1,example,q1
+
+```
+
+
+================================================================================
+=== FILE: examples\run_alignn_folder.sh ===
+================================================================================
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+sca alignn folder examples/cifs --out examples/alignn_results.csv --jsonl examples/alignn_results.jsonl
+
+```
+
+
+================================================================================
+=== FILE: examples\run_crystallm_eval.sh ===
+================================================================================
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+sca crystallm-eval manifest examples/cif_manifest.csv \
+  --path-col cif_path \
+  --formula-col target_formula \
+  --spacegroup-col target_space_group \
+  --method-col method \
+  --query-id-col query_id \
+  --alignn false \
+  --out examples/pre_dft_eval.csv \
+  --jsonl examples/pre_dft_eval.jsonl
+
+sca summarize examples/pre_dft_eval.csv \
+  --group-col method \
+  --out examples/pre_dft_summary_by_method.csv
+
+sca select-top-k examples/pre_dft_eval.csv \
+  --group-cols method,query_id \
+  --k 5 \
+  --out examples/top5_for_dft.csv
+
+```
+
+
+================================================================================
+=== FILE: examples\cifs\tiny_valid.cif ===
+================================================================================
+
+```
+data_NaCl
+_symmetry_space_group_name_H-M   'P 1'
+_cell_length_a   5.6402
+_cell_length_b   5.6402
+_cell_length_c   5.6402
+_cell_angle_alpha   90
+_cell_angle_beta    90
+_cell_angle_gamma   90
+_symmetry_Int_Tables_number 1
+loop_
+ _symmetry_equiv_pos_as_xyz
+ 'x, y, z'
+loop_
+ _atom_site_label
+ _atom_site_type_symbol
+ _atom_site_fract_x
+ _atom_site_fract_y
+ _atom_site_fract_z
+ _atom_site_occupancy
+ Na1 Na 0 0 0 1
+ Cl1 Cl 0.5 0.5 0.5 1
+
+```
+
+
+================================================================================
+=== FILE: sca\batch.py ===
+================================================================================
+
+```python
+"""Batch evaluation orchestration."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from uuid import uuid4
+
+from pymatgen.core import Structure
+from tqdm import tqdm
+
+from sca.evaluators.base import CrystalEvaluator
+from sca.evaluators.uniqueness import assign_duplicate_groups
+from sca.io import discover_cif_files, load_manifest_frame, parse_cif
+from sca.pipelines.crystallm_style import evaluate_one_cif
+from sca.scoring import compute_rank_score
+from sca.schemas import CrystalEvalRecord, CrystalEvaluationResult
+
+
+def evaluate_one(path: str | Path, evaluator: CrystalEvaluator) -> CrystalEvaluationResult:
+    """Original ALIGNN-only one-file helper retained for compatibility."""
+
+    metadata, structure = parse_cif(path)
+    if structure is None:
+        return CrystalEvaluationResult.from_parts(metadata)
+
+    evaluator_result = evaluator.evaluate(structure, metadata.input_path)
+    return CrystalEvaluationResult.from_parts(metadata, evaluator_result)
+
+
+def evaluate_many(
+    paths,
+    evaluator: CrystalEvaluator,
+    show_progress: bool = True,
+) -> list[CrystalEvaluationResult]:
+    path_list = [Path(path) for path in paths]
+    iterator = tqdm(path_list, desc="Evaluating CIFs", disable=not show_progress)
+    return [evaluate_one(path, evaluator) for path in iterator]
+
+
+def evaluate_folder(
+    folder_path: str | Path,
+    target_formula: str | None = None,
+    target_space_group: str | None = None,
+    method: str | None = None,
+    query_id: str | None = None,
+    require_spacegroup: bool = False,
+    run_alignn: bool = False,
+    recursive: bool = True,
+    reference_structures: dict[str, Structure] | None = None,
+) -> list[CrystalEvalRecord]:
+    paths = discover_cif_files(folder_path, recursive=recursive)
+    run_id = str(uuid4())
+    records: list[CrystalEvalRecord] = []
+    structures: dict[str, Structure] = {}
+
+    for path in tqdm(paths, desc="Evaluating CIFs"):
+        record, structure = evaluate_one_cif(
+            path,
+            target_formula=target_formula,
+            target_space_group=target_space_group,
+            method=method,
+            query_id=query_id,
+            require_spacegroup=require_spacegroup,
+            run_alignn=run_alignn,
+            reference_structures=reference_structures,
+            run_id=run_id,
+        )
+        records.append(record)
+        if structure is not None:
+            structures[record.input_path] = structure
+
+    return _finalize_duplicate_groups(records, structures)
+
+
+def evaluate_manifest(
+    manifest_csv: str | Path,
+    path_col: str = "cif_path",
+    formula_col: str | None = None,
+    spacegroup_col: str | None = None,
+    method_col: str | None = None,
+    query_id_col: str | None = None,
+    require_spacegroup: bool = False,
+    run_alignn: bool = False,
+    reference_structures: dict[str, Structure] | None = None,
+) -> list[CrystalEvalRecord]:
+    frame = load_manifest_frame(manifest_csv, path_col)
+    run_id = str(uuid4())
+    records: list[CrystalEvalRecord] = []
+    structures: dict[str, Structure] = {}
+
+    for _, row in tqdm(list(frame.iterrows()), desc="Evaluating CIFs"):
+        path = Path(str(row[path_col]))
+        record, structure = evaluate_one_cif(
+            path,
+            target_formula=_optional_cell(row, formula_col, frame.columns),
+            target_space_group=_optional_cell(row, spacegroup_col, frame.columns),
+            method=_optional_cell(row, method_col, frame.columns),
+            query_id=_optional_cell(row, query_id_col, frame.columns),
+            require_spacegroup=require_spacegroup,
+            run_alignn=run_alignn,
+            reference_structures=reference_structures,
+            run_id=run_id,
+        )
+        records.append(record)
+        if structure is not None:
+            structures[record.input_path] = structure
+
+    return _finalize_duplicate_groups(records, structures)
+
+
+def _finalize_duplicate_groups(
+    records: list[CrystalEvalRecord],
+    structures: dict[str, Structure],
+) -> list[CrystalEvalRecord]:
+    records = assign_duplicate_groups(records, structures)
+    return [
+        record.model_copy(update={"pre_dft_rank_score": compute_rank_score(record)})
+        for record in records
+    ]
+
+
+def _optional_cell(row, column: str | None, columns) -> str | None:
+    if not column or column not in columns:
+        return None
+    value = row[column]
+    if value is None or str(value).lower() == "nan" or str(value).strip() == "":
+        return None
+    return str(value)
+
+```
+
+
+================================================================================
+=== FILE: sca\cli.py ===
+================================================================================
+
+```python
+"""Command line interface for SCA."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pandas as pd
+import typer
+from click import ClickException
+from rich.console import Console
+
+from sca.batch import evaluate_folder, evaluate_manifest, evaluate_many, evaluate_one
+from sca.evaluators.alignn import AlignnEvaluator, DEFAULT_ALIGNN_MODEL
+from sca.evaluators.novelty import load_reference_structures_with_stats
+from sca.io import discover_cif_files, load_manifest, write_csv, write_jsonl, write_single_json, write_summary_csv
+from sca.pipelines.crystallm_style import evaluate_one_cif
+from sca.schemas import AggregateSummary
+
+app = typer.Typer(help="Structured Crystal Analyser.")
+crystallm_app = typer.Typer(help="CrystaLLM-style pre-DFT crystal evaluation.")
+alignn_app = typer.Typer(help="ALIGNN-based crystal structure evaluation.")
+app.add_typer(crystallm_app, name="crystallm-eval")
+app.add_typer(alignn_app, name="alignn")
+console = Console()
+
+
+def _parse_bool(value: bool | str) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    raise typer.BadParameter(f"Expected true or false, got '{value}'")
+
+
+@crystallm_app.command("one")
+def crystallm_one(
+    cif_path: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True),
+    target_formula: str | None = typer.Option(None, "--target-formula"),
+    target_space_group: str | None = typer.Option(None, "--target-space-group"),
+    out: Path = typer.Option(..., "--out", help="Output JSON path."),
+    require_spacegroup: str = typer.Option("false", "--require-spacegroup"),
+    alignn: str = typer.Option("false", "--alignn"),
+    novelty: str = typer.Option("false", "--novelty"),
+    reference_folder: Path | None = typer.Option(None, "--reference-folder", exists=True, file_okay=False, dir_okay=True),
+    reference_manifest: Path | None = typer.Option(None, "--reference-manifest", exists=True, file_okay=True, dir_okay=False),
+    reference_path_col: str = typer.Option("cif_path", "--reference-path-col"),
+    reference_id_col: str | None = typer.Option(None, "--reference-id-col"),
+) -> None:
+    """Evaluate one CIF with CrystaLLM-style pre-DFT checks."""
+
+    reference_structures = _load_references_for_cli(
+        novelty=_parse_bool(novelty),
+        reference_folder=reference_folder,
+        reference_manifest=reference_manifest,
+        reference_path_col=reference_path_col,
+        reference_id_col=reference_id_col,
+    )
+    record, _ = evaluate_one_cif(
+        cif_path,
+        target_formula=target_formula,
+        target_space_group=target_space_group,
+        require_spacegroup=_parse_bool(require_spacegroup),
+        run_alignn=_parse_bool(alignn),
+        reference_structures=reference_structures,
+    )
+    write_single_json(record, out)
+    console.print_json(record.model_dump_json())
+
+
+@crystallm_app.command("folder")
+def crystallm_folder(
+    folder_path: Path = typer.Argument(..., exists=True, file_okay=False, dir_okay=True, readable=True),
+    out: Path = typer.Option(..., "--out", help="Output CSV path."),
+    jsonl: Path = typer.Option(..., "--jsonl", help="Output JSONL path."),
+    target_formula: str | None = typer.Option(None, "--target-formula"),
+    target_space_group: str | None = typer.Option(None, "--target-space-group"),
+    require_spacegroup: str = typer.Option("false", "--require-spacegroup"),
+    alignn: str = typer.Option("false", "--alignn"),
+    novelty: str = typer.Option("false", "--novelty"),
+    reference_folder: Path | None = typer.Option(None, "--reference-folder", exists=True, file_okay=False, dir_okay=True),
+    reference_manifest: Path | None = typer.Option(None, "--reference-manifest", exists=True, file_okay=True, dir_okay=False),
+    reference_path_col: str = typer.Option("cif_path", "--reference-path-col"),
+    reference_id_col: str | None = typer.Option(None, "--reference-id-col"),
+    recursive: str = typer.Option("true", "--recursive"),
+) -> None:
+    """Evaluate all CIF files in a folder and write CSV plus JSONL reports."""
+
+    reference_structures = _load_references_for_cli(
+        novelty=_parse_bool(novelty),
+        reference_folder=reference_folder,
+        reference_manifest=reference_manifest,
+        reference_path_col=reference_path_col,
+        reference_id_col=reference_id_col,
+    )
+    records = evaluate_folder(
+        folder_path,
+        target_formula=target_formula,
+        target_space_group=target_space_group,
+        require_spacegroup=_parse_bool(require_spacegroup),
+        run_alignn=_parse_bool(alignn),
+        recursive=_parse_bool(recursive),
+        reference_structures=reference_structures,
+    )
+    write_csv(records, out)
+    write_jsonl(records, jsonl)
+    console.print(f"[green]Wrote {len(records)} records[/green] to {out} and {jsonl}")
+
+
+@crystallm_app.command("manifest")
+def crystallm_manifest(
+    manifest_csv: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True),
+    path_col: str = typer.Option("cif_path", "--path-col"),
+    formula_col: str = typer.Option("target_formula", "--formula-col"),
+    spacegroup_col: str = typer.Option("target_space_group", "--spacegroup-col"),
+    method_col: str = typer.Option("method", "--method-col"),
+    query_id_col: str = typer.Option("query_id", "--query-id-col"),
+    out: Path = typer.Option(..., "--out", help="Output CSV path."),
+    jsonl: Path = typer.Option(..., "--jsonl", help="Output JSONL path."),
+    require_spacegroup: str = typer.Option("false", "--require-spacegroup"),
+    alignn: str = typer.Option("false", "--alignn"),
+    novelty: str = typer.Option("false", "--novelty"),
+    reference_folder: Path | None = typer.Option(None, "--reference-folder", exists=True, file_okay=False, dir_okay=True),
+    reference_manifest: Path | None = typer.Option(None, "--reference-manifest", exists=True, file_okay=True, dir_okay=False),
+    reference_path_col: str = typer.Option("cif_path", "--reference-path-col"),
+    reference_id_col: str | None = typer.Option(None, "--reference-id-col"),
+) -> None:
+    """Evaluate CIF paths listed in a manifest."""
+
+    reference_structures = _load_references_for_cli(
+        novelty=_parse_bool(novelty),
+        reference_folder=reference_folder,
+        reference_manifest=reference_manifest,
+        reference_path_col=reference_path_col,
+        reference_id_col=reference_id_col,
+    )
+    records = evaluate_manifest(
+        manifest_csv,
+        path_col=path_col,
+        formula_col=formula_col,
+        spacegroup_col=spacegroup_col,
+        method_col=method_col,
+        query_id_col=query_id_col,
+        require_spacegroup=_parse_bool(require_spacegroup),
+        run_alignn=_parse_bool(alignn),
+        reference_structures=reference_structures,
+    )
+    write_csv(records, out)
+    write_jsonl(records, jsonl)
+    console.print(f"[green]Wrote {len(records)} records[/green] to {out} and {jsonl}")
+
+
+@app.command("select-top-k")
+def select_top_k(
+    eval_csv: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True),
+    group_cols: str = typer.Option("method,query_id", "--group-cols"),
+    k: int = typer.Option(5, "--k", min=1),
+    out: Path = typer.Option(..., "--out", help="Output CSV path."),
+) -> None:
+    """Select up to k records per group for later DFT."""
+
+    frame = pd.read_csv(eval_csv)
+    columns = [column.strip() for column in group_cols.split(",") if column.strip()]
+    for column in columns + ["pre_dft_rank_score"]:
+        if column not in frame.columns:
+            raise typer.BadParameter(f"Column '{column}' not found in {eval_csv}")
+    selected = (
+        frame.sort_values(columns + ["pre_dft_rank_score"], ascending=True)
+        .groupby(columns, dropna=False, as_index=False, group_keys=False)
+        .head(k)
+        .copy()
+    )
+    selected["selected_for_dft"] = True
+    out.parent.mkdir(parents=True, exist_ok=True)
+    selected.to_csv(out, index=False)
+    console.print(f"[green]Selected {len(selected)} records[/green] into {out}")
+
+
+@app.command("summarize")
+def summarize(
+    eval_csv: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True),
+    group_col: str = typer.Option("method", "--group-col"),
+    out: Path = typer.Option(..., "--out", help="Output summary CSV path."),
+) -> None:
+    """Summarize an evaluation CSV by group."""
+
+    frame = pd.read_csv(eval_csv)
+    if group_col not in frame.columns:
+        frame[group_col] = None
+    summaries = [_summarize_group(str(group), group_frame) for group, group_frame in frame.groupby(group_col, dropna=False)]
+    write_summary_csv(summaries, out)
+    console.print(f"[green]Wrote {len(summaries)} summary rows[/green] to {out}")
+
+
+def _summarize_group(group_value: str, frame: pd.DataFrame) -> AggregateSummary:
+    alignn_values = _numeric(frame, "formation_energy_per_atom").dropna()
+    return AggregateSummary(
+        group_value=group_value,
+        num_generated=len(frame),
+        parse_valid_rate=_bool_rate(frame, "parse_ok"),
+        target_formula_match_rate=_bool_rate(frame, "target_formula_match"),
+        space_group_consistency_rate=_bool_rate(frame, "space_group_consistent"),
+        multiplicity_consistency_rate=_bool_rate(frame, "multiplicity_consistent"),
+        bond_reasonable_rate=_bool_rate(frame, "bond_lengths_reasonable"),
+        geometry_ok_rate=_bool_rate(frame, "geometry_ok"),
+        pre_dft_valid_rate=_bool_rate(frame, "pre_dft_valid"),
+        unique_valid_count=_unique_valid_count(frame),
+        duplicate_rate=_bool_rate(frame, "is_duplicate"),
+        novelty_checked_count=int(_bool_series(frame, "novelty_checked").sum()) if "novelty_checked" in frame else 0,
+        novel_rate=_bool_rate(frame, "novel_by_structure_matcher"),
+        known_match_rate=_bool_rate(frame, "known_match"),
+        median_alignn_formation_energy=float(alignn_values.median()) if not alignn_values.empty else None,
+        best_alignn_formation_energy=float(alignn_values.min()) if not alignn_values.empty else None,
+    )
+
+
+def _load_references_for_cli(
+    novelty: bool,
+    reference_folder: Path | None,
+    reference_manifest: Path | None,
+    reference_path_col: str,
+    reference_id_col: str | None,
+):
+    if not novelty:
+        return None
+    if reference_folder is None and reference_manifest is None:
+        raise ClickException(
+            "--novelty true requires --reference-folder or --reference-manifest"
+        )
+    load_result = load_reference_structures_with_stats(
+        reference_folder=reference_folder,
+        reference_manifest=reference_manifest,
+        path_col=reference_path_col,
+        id_col=reference_id_col,
+    )
+    console.print(
+        "[cyan]Loaded reference structures:[/cyan] "
+        f"{load_result.loaded_count} loaded, {load_result.failed_count} failed"
+    )
+    return load_result.structures
+
+
+def _bool_rate(frame: pd.DataFrame, column: str) -> float | None:
+    if column not in frame.columns:
+        return None
+    series = _bool_series(frame, column)
+    non_null = series.dropna()
+    if non_null.empty:
+        return None
+    return float(non_null.mean())
+
+
+def _bool_series(frame: pd.DataFrame, column: str) -> pd.Series:
+    return frame[column].map(
+        lambda value: None
+        if pd.isna(value)
+        else str(value).strip().lower() in {"true", "1", "yes"}
+        if not isinstance(value, bool)
+        else value
+    )
+
+
+def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:
+    if column not in frame.columns:
+        return pd.Series(dtype=float)
+    return pd.to_numeric(frame[column], errors="coerce")
+
+
+def _unique_valid_count(frame: pd.DataFrame) -> int:
+    if "pre_dft_valid" not in frame.columns:
+        return 0
+    valid = _bool_series(frame, "pre_dft_valid") == True  # noqa: E712
+    if "is_unique_representative" not in frame.columns:
+        return int(valid.sum())
+    unique = _bool_series(frame, "is_unique_representative")
+    return int((valid & (unique != False)).sum())  # noqa: E712
+
+
+def _alignn(model: str) -> AlignnEvaluator:
+    return AlignnEvaluator(model_name=model)
+
+
+@alignn_app.command("one")
+def alignn_one(
+    cif_path: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True),
+    out: Path = typer.Option(..., "--out", help="Output JSON path."),
+    model: str = typer.Option(DEFAULT_ALIGNN_MODEL, "--model", help="ALIGNN model name."),
+) -> None:
+    """Evaluate one CIF and write a JSON result."""
+
+    result = evaluate_one(cif_path, _alignn(model))
+    write_single_json(result, out)
+    console.print_json(result.model_dump_json())
+
+
+@alignn_app.command("folder")
+def alignn_folder(
+    folder_path: Path = typer.Argument(..., exists=True, file_okay=False, dir_okay=True, readable=True),
+    out: Path = typer.Option(..., "--out", help="Output CSV path."),
+    jsonl: Path = typer.Option(..., "--jsonl", help="Output JSONL path."),
+    model: str = typer.Option(DEFAULT_ALIGNN_MODEL, "--model", help="ALIGNN model name."),
+) -> None:
+    """Evaluate all CIF files in a folder and write CSV plus JSONL outputs."""
+
+    paths = discover_cif_files(folder_path)
+    results = evaluate_many(paths, _alignn(model))
+    write_csv(results, out)
+    write_jsonl(results, jsonl)
+    console.print(f"[green]Wrote {len(results)} results[/green] to {out} and {jsonl}")
+
+
+@alignn_app.command("manifest")
+def alignn_manifest(
+    csv_path: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True),
+    path_col: str = typer.Option("cif_path", "--path-col", help="Manifest column containing CIF paths."),
+    out: Path = typer.Option(..., "--out", help="Output CSV path."),
+    jsonl: Path = typer.Option(..., "--jsonl", help="Output JSONL path."),
+    model: str = typer.Option(DEFAULT_ALIGNN_MODEL, "--model", help="ALIGNN model name."),
+) -> None:
+    """Evaluate CIF paths listed in a CSV manifest."""
+
+    paths = load_manifest(csv_path, path_col)
+    results = evaluate_many(paths, _alignn(model))
+    write_csv(results, out)
+    write_jsonl(results, jsonl)
+    console.print(f"[green]Wrote {len(results)} results[/green] to {out} and {jsonl}")
+
+
+if __name__ == "__main__":
+    app()
+
+```
+
+
+================================================================================
+=== FILE: sca\io.py ===
+================================================================================
+
+```python
+"""Input and output helpers for SCA."""
+
+from __future__ import annotations
+
+import csv
+import json
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+
+from sca.evaluators.cif_parse import parse_cif as parse_cif_new
+from sca.schemas import CifMetadata, CrystalEvalRecord, CrystalEvaluationResult
+
+
+RESULT_FIELDS = list(CrystalEvalRecord.model_fields.keys())
+
+
+def parse_cif(path: str | Path):
+    """Compatibility wrapper returning legacy CIF metadata plus Structure."""
+
+    structure, result = parse_cif_new(path)
+    cif_path = Path(path)
+    metadata = CifMetadata(
+        input_path=str(cif_path),
+        file_name=cif_path.name,
+        parse_ok=result.parse_ok,
+        formula=result.formula,
+        reduced_formula=result.reduced_formula,
+        n_sites=result.n_sites,
+        volume=result.volume,
+        density=result.density,
+        error_type=result.error_type,
+        error_message=result.error_message,
+    )
+    return metadata, structure
+
+
+def discover_cif_files(folder: str | Path, recursive: bool = True) -> list[Path]:
+    """Return CIF files in a folder, sorted for deterministic batch output."""
+
+    folder_path = Path(folder)
+    iterator = folder_path.rglob("*.cif") if recursive else folder_path.glob("*.cif")
+    return sorted(path for path in iterator if path.is_file())
+
+
+def load_manifest(csv_path: str | Path, path_col: str) -> list[Path]:
+    """Load CIF paths from a CSV manifest and resolve relative paths."""
+
+    frame = load_manifest_frame(csv_path, path_col)
+    return [Path(path) for path in frame[path_col].tolist()]
+
+
+def load_manifest_frame(csv_path: str | Path, path_col: str) -> pd.DataFrame:
+    manifest_path = Path(csv_path)
+    frame = pd.read_csv(manifest_path)
+    if path_col not in frame.columns:
+        available = ", ".join(frame.columns)
+        raise ValueError(f"Manifest column '{path_col}' not found. Available columns: {available}")
+    frame = frame.copy()
+    frame[path_col] = [
+        str(path if path.is_absolute() else (manifest_path.parent / path).resolve())
+        for path in (Path(str(value)) for value in frame[path_col])
+    ]
+    return frame
+
+
+def write_single_json(result: CrystalEvalRecord | CrystalEvaluationResult, output_path: str | Path) -> None:
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8")
+
+
+def write_csv(results: Iterable[Any], output_path: str | Path) -> None:
+    rows = [_to_row(result) for result in results]
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if not rows:
+        pd.DataFrame(columns=RESULT_FIELDS).to_csv(out, index=False)
+        return
+    pd.DataFrame(rows).to_csv(out, index=False)
+
+
+def write_jsonl(results: Iterable[Any], output_path: str | Path) -> None:
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", encoding="utf-8") as handle:
+        for result in results:
+            handle.write(json.dumps(_to_row(result), ensure_ascii=False) + "\n")
+
+
+def write_summary_csv(rows: Iterable[Any], output_path: str | Path) -> None:
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([_to_row(row) for row in rows]).to_csv(out, index=False)
+
+
+def _to_row(result: Any) -> dict[str, Any]:
+    if hasattr(result, "model_dump"):
+        return result.model_dump()
+    if hasattr(result, "to_row"):
+        return result.to_row()
+    if isinstance(result, dict):
+        return result
+    return dict(result)
+
+```
+
+
+================================================================================
+=== FILE: sca\schemas.py ===
+================================================================================
+
+```python
+"""Pydantic schemas for SCA pre-DFT evaluation."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class CifParseResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    parse_ok: bool
+    formula: str | None = None
+    reduced_formula: str | None = None
+    n_sites: int | None = None
+    volume: float | None = None
+    density: float | None = None
+    lattice_a: float | None = None
+    lattice_b: float | None = None
+    lattice_c: float | None = None
+    lattice_alpha: float | None = None
+    lattice_beta: float | None = None
+    lattice_gamma: float | None = None
+    error_type: str | None = None
+    error_message: str | None = None
+
+
+class CompositionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_formula: str | None = None
+    formula: str | None = None
+    reduced_formula: str | None = None
+    target_reduced_formula: str | None = None
+    target_formula_match: bool | None = None
+    composition_error: str | None = None
+
+
+class SymmetryResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    declared_space_group: str | None = None
+    declared_space_group_number: int | None = None
+    detected_space_group: str | None = None
+    detected_space_group_number: int | None = None
+    target_space_group: str | None = None
+    space_group_consistent: bool | None = None
+    symprec_used: float | None = None
+    angle_tolerance_used: float | None = None
+    symmetry_error: str | None = None
+
+
+class MultiplicityResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    multiplicity_checked: bool
+    multiplicity_consistent: bool | None = None
+    declared_atom_count: int | None = None
+    expanded_atom_count: int | None = None
+    site_count: int | None = None
+    multiplicity_error: str | None = None
+
+
+class BondResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    bond_reasonableness_score: float | None = None
+    bond_lengths_reasonable: bool | None = None
+    min_distance: float | None = None
+    min_distance_pair: str | None = None
+    num_bad_contacts: int = 0
+    bad_contact_pairs: list[str] = Field(default_factory=list)
+    bond_error: str | None = None
+
+
+class GeometryResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    geometry_ok: bool | None = None
+    volume: float | None = None
+    volume_per_atom: float | None = None
+    density: float | None = None
+    geometry_warning_count: int = 0
+    geometry_warnings: list[str] = Field(default_factory=list)
+    geometry_error: str | None = None
+
+
+class UniquenessResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    duplicate_group_id: str | None = None
+    is_duplicate: bool | None = None
+    is_unique_representative: bool | None = None
+    num_duplicates_in_group: int | None = None
+
+
+class NoveltyResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    novelty_checked: bool
+    nearest_reference_id: str | None = None
+    known_match: bool | None = None
+    novel_by_structure_matcher: bool | None = None
+    novelty_error: str | None = None
+
+
+class AlignnResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    alignn_ok: bool
+    alignn_model: str | None = None
+    formation_energy_per_atom: float | None = None
+    alignn_error: str | None = None
+
+
+class CrystalEvalRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str
+    method: str | None = None
+    query_id: str | None = None
+    input_path: str
+    file_name: str
+    parse_ok: bool
+    formula: str | None = None
+    reduced_formula: str | None = None
+    target_formula: str | None = None
+    target_formula_match: bool | None = None
+    declared_space_group: str | None = None
+    detected_space_group: str | None = None
+    target_space_group: str | None = None
+    space_group_consistent: bool | None = None
+    multiplicity_checked: bool = False
+    multiplicity_consistent: bool | None = None
+    bond_reasonableness_score: float | None = None
+    bond_lengths_reasonable: bool | None = None
+    min_distance: float | None = None
+    min_distance_pair: str | None = None
+    num_bad_contacts: int = 0
+    volume: float | None = None
+    volume_per_atom: float | None = None
+    density: float | None = None
+    geometry_ok: bool | None = None
+    geometry_warning_count: int = 0
+    duplicate_group_id: str | None = None
+    is_duplicate: bool | None = None
+    is_unique_representative: bool | None = None
+    novelty_checked: bool = False
+    nearest_reference_id: str | None = None
+    known_match: bool | None = None
+    novel_by_structure_matcher: bool | None = None
+    novelty_error: str | None = None
+    alignn_ok: bool = False
+    alignn_model: str | None = None
+    formation_energy_per_atom: float | None = None
+    pre_dft_valid: bool = False
+    pre_dft_rank_score: float = 1_000_000.0
+    selected_for_dft: bool = False
+    error_type: str | None = None
+    error_message: str | None = None
+
+    def to_row(self) -> dict[str, Any]:
+        return self.model_dump()
+
+
+class AggregateSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    group_value: str | None = None
+    num_generated: int
+    parse_valid_rate: float | None = None
+    target_formula_match_rate: float | None = None
+    space_group_consistency_rate: float | None = None
+    multiplicity_consistency_rate: float | None = None
+    bond_reasonable_rate: float | None = None
+    geometry_ok_rate: float | None = None
+    pre_dft_valid_rate: float | None = None
+    unique_valid_count: int
+    duplicate_rate: float | None = None
+    novelty_checked_count: int
+    novel_rate: float | None = None
+    known_match_rate: float | None = None
+    median_alignn_formation_energy: float | None = None
+    best_alignn_formation_energy: float | None = None
+
+
+# Compatibility schemas retained for the original ALIGNN-only API/tests.
+class CifMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    input_path: str
+    file_name: str
+    parse_ok: bool = False
+    formula: str | None = None
+    reduced_formula: str | None = None
+    n_sites: int | None = None
+    volume: float | None = None
+    density: float | None = None
+    error_type: str | None = None
+    error_message: str | None = None
+
+    @classmethod
+    def for_path(cls, path: Path) -> "CifMetadata":
+        return cls(input_path=str(path), file_name=path.name)
+
+
+class EvaluatorResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ok: bool = False
+    model: str | None = None
+    values: dict[str, Any] = Field(default_factory=dict)
+    error_type: str | None = None
+    error_message: str | None = None
+
+
+class CrystalEvaluationResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    input_path: str
+    file_name: str
+    parse_ok: bool
+    formula: str | None = None
+    reduced_formula: str | None = None
+    n_sites: int | None = None
+    volume: float | None = None
+    density: float | None = None
+    alignn_ok: bool = False
+    alignn_model: str | None = None
+    formation_energy_per_atom: float | None = None
+    error_type: str | None = None
+    error_message: str | None = None
+
+    @classmethod
+    def from_parts(
+        cls,
+        cif: CifMetadata,
+        alignn: EvaluatorResult | None = None,
+    ) -> "CrystalEvaluationResult":
+        alignn = alignn or EvaluatorResult()
+        return cls(
+            input_path=cif.input_path,
+            file_name=cif.file_name,
+            parse_ok=cif.parse_ok,
+            formula=cif.formula,
+            reduced_formula=cif.reduced_formula,
+            n_sites=cif.n_sites,
+            volume=cif.volume,
+            density=cif.density,
+            alignn_ok=alignn.ok,
+            alignn_model=alignn.model,
+            formation_energy_per_atom=alignn.values.get("formation_energy_per_atom"),
+            error_type=alignn.error_type or cif.error_type,
+            error_message=alignn.error_message or cif.error_message,
+        )
+
+    def to_row(self) -> dict[str, Any]:
+        return self.model_dump()
+
+```
+
+
+================================================================================
+=== FILE: sca\scoring.py ===
+================================================================================
+
+```python
+"""Pre-DFT validity and ranking utilities."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sca.schemas import CrystalEvalRecord
+
+
+def compute_pre_dft_valid(record: "CrystalEvalRecord", require_spacegroup: bool = False) -> bool:
+    valid = (
+        record.parse_ok
+        and record.target_formula_match is not False
+        and record.multiplicity_consistent is not False
+        and record.bond_lengths_reasonable is True
+        and record.geometry_ok is True
+    )
+    if require_spacegroup:
+        valid = valid and record.space_group_consistent is True
+    return bool(valid)
+
+
+def compute_rank_score(record: "CrystalEvalRecord") -> float:
+    score = 0.0
+    if not record.parse_ok:
+        score += 1_000_000
+    if record.target_formula_match is False:
+        score += 100_000
+    if record.bond_lengths_reasonable is not True:
+        score += 50_000
+    if record.geometry_ok is not True:
+        score += 25_000
+    if record.multiplicity_consistent is False:
+        score += 25_000
+    if record.space_group_consistent is False:
+        score += 10_000
+    if record.is_duplicate is True and record.is_unique_representative is False:
+        score += 5_000
+    score += record.num_bad_contacts * 100
+    score += record.geometry_warning_count * 10
+    if record.formation_energy_per_atom is not None:
+        score += float(record.formation_energy_per_atom)
+    elif record.pre_dft_valid:
+        score += 1_000
+    return float(score)
+
+```
+
+
+================================================================================
+=== FILE: sca\__init__.py ===
+================================================================================
+
+```python
+"""Structured Crystal Analyser."""
+
+from sca.schemas import CrystalEvalRecord, CrystalEvaluationResult
+
+__all__ = ["CrystalEvalRecord", "CrystalEvaluationResult"]
+
+__version__ = "0.1.0"
+
+```
+
+
+================================================================================
+=== FILE: sca\evaluators\alignn.py ===
+================================================================================
+
+```python
+"""ALIGNN evaluator wrapper."""
+
+from __future__ import annotations
+
+import json
+import os
+import shlex
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Any
+
+from pymatgen.core import Structure
+
+from sca.evaluators.base import CrystalEvaluator, StructurePredictor
+from sca.schemas import AlignnResult, EvaluatorResult
+
+
+DEFAULT_ALIGNN_MODEL = "jv_formation_energy_peratom_alignn"
+DEFAULT_CRYSTALLM_ALIGNN_MODEL = "mp_e_form_alignn"
+
+
+class AlignnEvaluator(CrystalEvaluator):
+    """Predict formation energy per atom with an ALIGNN model.
+
+    A predictor callable can be injected for tests or internal deployments. Without one, the
+    evaluator first tries a small set of known Python API entry points, then an optional
+    subprocess fallback configured with ``SCA_ALIGNN_COMMAND``.
+    """
+
+    name = "alignn"
+
+    def __init__(
+        self,
+        model_name: str = DEFAULT_ALIGNN_MODEL,
+        predictor: StructurePredictor | None = None,
+        command_template: str | None = None,
+        timeout_seconds: int = 300,
+    ) -> None:
+        self.model_name = model_name
+        self._predictor = predictor
+        self._command_template = command_template or os.environ.get("SCA_ALIGNN_COMMAND")
+        self._timeout_seconds = timeout_seconds
+
+    def evaluate(self, structure: Structure, input_path: str) -> EvaluatorResult:
+        try:
+            value = self._predict(structure, input_path)
+        except Exception as exc:
+            return EvaluatorResult(
+                ok=False,
+                model=self.model_name,
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            )
+
+        return EvaluatorResult(
+            ok=True,
+            model=self.model_name,
+            values={"formation_energy_per_atom": float(value)},
+        )
+
+    def _predict(self, structure: Structure, input_path: str) -> float:
+        if self._predictor is not None:
+            return float(self._predictor(structure, input_path))
+
+        try:
+            return self._predict_with_python_api(structure, input_path)
+        except Exception as api_exc:
+            if self._command_template:
+                try:
+                    return self._predict_with_subprocess(structure)
+                except Exception as subprocess_exc:
+                    raise RuntimeError(
+                        f"ALIGNN Python API failed ({api_exc}); subprocess fallback failed ({subprocess_exc})"
+                    ) from subprocess_exc
+            raise RuntimeError(
+                "ALIGNN prediction is unavailable. Install alignn and its pretrained prediction "
+                "dependencies, inject a predictor, or set SCA_ALIGNN_COMMAND."
+            ) from api_exc
+
+    def _predict_with_python_api(self, structure: Structure, input_path: str) -> float:
+        candidates = [
+            ("alignn.pretrained", "get_prediction"),
+            ("alignn.pretrained", "predict_structure"),
+            ("alignn.scripts.pretrained", "get_prediction"),
+        ]
+        errors: list[str] = []
+        for module_name, function_name in candidates:
+            try:
+                module = __import__(module_name, fromlist=[function_name])
+                function = getattr(module, function_name)
+            except Exception as exc:
+                errors.append(f"{module_name}.{function_name}: {exc}")
+                continue
+
+            try:
+                prediction = self._call_alignn_function(function, structure, input_path)
+                return _extract_scalar(prediction)
+            except Exception as exc:
+                errors.append(f"{module_name}.{function_name}: {exc}")
+
+        raise RuntimeError("No compatible ALIGNN Python API entry point succeeded: " + "; ".join(errors))
+
+    def _call_alignn_function(self, function: Any, structure: Structure, input_path: str) -> Any:
+        try:
+            from jarvis.core.atoms import Atoms
+        except Exception:
+            atoms = None
+        else:
+            atoms = Atoms.from_pymatgen(structure)
+
+        call_attempts = []
+        if atoms is not None:
+            call_attempts.extend(
+                [
+                    lambda: function(atoms=atoms, model_name=self.model_name),
+                    lambda: function(atoms, model_name=self.model_name),
+                    lambda: function(atoms, self.model_name),
+                ]
+            )
+        call_attempts.extend(
+            [
+                lambda: function(filename=input_path, model_name=self.model_name),
+                lambda: function(input_path, model_name=self.model_name),
+                lambda: function(input_path, self.model_name),
+            ]
+        )
+
+        errors: list[str] = []
+        for call in call_attempts:
+            try:
+                return call()
+            except TypeError as exc:
+                errors.append(str(exc))
+                continue
+
+        raise TypeError("; ".join(errors))
+
+    def _predict_with_subprocess(self, structure: Structure) -> float:
+        if not self._command_template:
+            raise RuntimeError("No ALIGNN subprocess command configured")
+
+        with tempfile.TemporaryDirectory(prefix="sca-alignn-") as tmp_dir:
+            poscar_path = Path(tmp_dir) / "POSCAR"
+            structure.to(fmt="poscar", filename=str(poscar_path))
+            command = self._command_template.format(input=str(poscar_path), model=self.model_name)
+            completed = subprocess.run(
+                shlex.split(command),
+                capture_output=True,
+                text=True,
+                timeout=self._timeout_seconds,
+                check=False,
+            )
+            if completed.returncode != 0:
+                stderr = completed.stderr.strip() or completed.stdout.strip()
+                raise RuntimeError(f"ALIGNN subprocess exited {completed.returncode}: {stderr}")
+            return _extract_scalar(completed.stdout)
+
+
+def predict_alignn_formation_energy(
+    cif_path: str | Path,
+    model_name: str = DEFAULT_CRYSTALLM_ALIGNN_MODEL,
+) -> AlignnResult:
+    """Predict formation energy per atom for a CIF path, returning structured errors."""
+
+    try:
+        structure = Structure.from_file(str(cif_path))
+    except Exception as exc:
+        return AlignnResult(
+            alignn_ok=False,
+            alignn_model=model_name,
+            alignn_error=f"CIF parse failed before ALIGNN prediction: {type(exc).__name__}: {exc}",
+        )
+
+    evaluator = AlignnEvaluator(model_name=model_name)
+    result = evaluator.evaluate(structure, str(cif_path))
+    if not result.ok:
+        return AlignnResult(
+            alignn_ok=False,
+            alignn_model=model_name,
+            alignn_error=result.error_message or result.error_type or "ALIGNN prediction failed",
+        )
+    return AlignnResult(
+        alignn_ok=True,
+        alignn_model=model_name,
+        formation_energy_per_atom=result.values.get("formation_energy_per_atom"),
+    )
+
+
+def _extract_scalar(prediction: Any) -> float:
+    """Extract a scalar prediction from common API or CLI response shapes."""
+
+    if isinstance(prediction, int | float):
+        return float(prediction)
+
+    if isinstance(prediction, str):
+        text = prediction.strip()
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            for token in reversed(text.replace(",", " ").split()):
+                try:
+                    return float(token)
+                except ValueError:
+                    continue
+            raise ValueError(f"Could not find numeric prediction in ALIGNN output: {text[:200]}")
+        return _extract_scalar(parsed)
+
+    if isinstance(prediction, dict):
+        for key in (
+            "formation_energy_per_atom",
+            "prediction",
+            "predictions",
+            "target",
+            "output",
+            DEFAULT_ALIGNN_MODEL,
+        ):
+            if key in prediction:
+                return _extract_scalar(prediction[key])
+
+    if isinstance(prediction, list | tuple) and prediction:
+        return _extract_scalar(prediction[0])
+
+    raise ValueError(f"Could not extract scalar prediction from {type(prediction).__name__}")
+
+```
+
+
+================================================================================
+=== FILE: sca\evaluators\base.py ===
+================================================================================
+
+```python
+"""Base interfaces for crystal evaluators."""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import Protocol
+
+from pymatgen.core import Structure
+
+from sca.schemas import EvaluatorResult
+
+
+class CrystalEvaluator(ABC):
+    """Interface implemented by all SCA structure evaluators."""
+
+    name: str
+    model_name: str
+
+    @abstractmethod
+    def evaluate(self, structure: Structure, input_path: str) -> EvaluatorResult:
+        """Evaluate a parsed structure and return a structured result."""
+
+
+class StructurePredictor(Protocol):
+    """Callable used by tests or adapters to predict a scalar property."""
+
+    def __call__(self, structure: Structure, input_path: str) -> float:
+        ...
+
+```
+
+
+================================================================================
+=== FILE: sca\evaluators\bonds.py ===
+================================================================================
+
+```python
+"""Bond/contact reasonableness checks."""
+
+from __future__ import annotations
+
+from pymatgen.core import Element, Structure
+
+from sca.schemas import BondResult
+
+
+FALLBACK_RADII = {
+    "H": 0.31,
+    "C": 0.76,
+    "N": 0.71,
+    "O": 0.66,
+    "F": 0.57,
+    "Na": 1.66,
+    "Mg": 1.41,
+    "Al": 1.21,
+    "Si": 1.11,
+    "P": 1.07,
+    "S": 1.05,
+    "Cl": 1.02,
+    "K": 2.03,
+    "Ca": 1.76,
+}
+
+
+def evaluate_bonds(
+    structure: Structure,
+    tolerance_low: float = 0.7,
+    tolerance_high: float = 1.3,
+    absolute_min_non_h: float = 0.6,
+    absolute_min_h: float = 0.35,
+) -> BondResult:
+    try:
+        if len(structure) < 2:
+            return BondResult(
+                bond_reasonableness_score=1.0,
+                bond_lengths_reasonable=True,
+                num_bad_contacts=0,
+            )
+
+        max_radius = max(_radius(str(site.specie)) for site in structure)
+        cutoff = max(absolute_min_non_h, tolerance_high * max_radius * 2)
+        neighbors = structure.get_all_neighbors(cutoff, include_index=True)
+        min_distance: float | None = None
+        min_pair: str | None = None
+        bad_contacts: list[str] = []
+        seen: set[tuple[int, int, float]] = set()
+
+        for i, site_neighbors in enumerate(neighbors):
+            elem_i = str(structure[i].specie)
+            for neighbor in site_neighbors:
+                j = int(neighbor.index)
+                distance = float(neighbor.nn_distance)
+                key = (min(i, j), max(i, j), round(distance, 5))
+                if i == j or key in seen:
+                    continue
+                seen.add(key)
+                elem_j = str(structure[j].specie)
+                pair = f"{elem_i}-{elem_j}"
+                if min_distance is None or distance < min_distance:
+                    min_distance = distance
+                    min_pair = pair
+                absolute_min = absolute_min_h if "H" in (elem_i, elem_j) else absolute_min_non_h
+                radius_sum = _radius(elem_i) + _radius(elem_j)
+                if distance < absolute_min or distance < tolerance_low * radius_sum:
+                    bad_contacts.append(f"{pair}:{distance:.3f}")
+
+        num_bad = len(bad_contacts)
+        score = 1.0 / (1.0 + num_bad)
+        return BondResult(
+            bond_reasonableness_score=score,
+            bond_lengths_reasonable=num_bad == 0,
+            min_distance=min_distance,
+            min_distance_pair=min_pair,
+            num_bad_contacts=num_bad,
+            bad_contact_pairs=bad_contacts[:50],
+        )
+    except Exception as exc:
+        return BondResult(
+            bond_reasonableness_score=None,
+            bond_lengths_reasonable=None,
+            bond_error=f"{type(exc).__name__}: {exc}",
+        )
+
+
+def _radius(symbol: str) -> float:
+    try:
+        radius = Element(symbol).covalent_radius
+        if radius is not None:
+            return float(radius)
+    except Exception:
+        pass
+    return FALLBACK_RADII.get(symbol, 1.0)
+
+```
+
+
+================================================================================
+=== FILE: sca\evaluators\cif_parse.py ===
+================================================================================
+
+```python
+"""CIF parsing evaluator."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from pymatgen.core import Structure
+
+from sca.schemas import CifParseResult
+
+
+def parse_cif(path: str | Path) -> tuple[Structure | None, CifParseResult]:
+    """Parse a CIF file with pymatgen and return structured metadata."""
+
+    try:
+        structure = Structure.from_file(str(path))
+    except Exception as exc:
+        return None, CifParseResult(
+            parse_ok=False,
+            error_type=type(exc).__name__,
+            error_message=str(exc),
+        )
+
+    lattice = structure.lattice
+    return structure, CifParseResult(
+        parse_ok=True,
+        formula=structure.composition.formula,
+        reduced_formula=structure.composition.reduced_formula,
+        n_sites=len(structure),
+        volume=float(structure.volume),
+        density=float(structure.density),
+        lattice_a=float(lattice.a),
+        lattice_b=float(lattice.b),
+        lattice_c=float(lattice.c),
+        lattice_alpha=float(lattice.alpha),
+        lattice_beta=float(lattice.beta),
+        lattice_gamma=float(lattice.gamma),
+    )
+
+```
+
+
+================================================================================
+=== FILE: sca\evaluators\composition.py ===
+================================================================================
+
+```python
+"""Composition checks."""
+
+from __future__ import annotations
+
+from pymatgen.core import Composition, Structure
+
+from sca.schemas import CompositionResult
+
+
+def evaluate_composition(
+    structure: Structure,
+    target_formula: str | None,
+) -> CompositionResult:
+    """Compare a structure composition against an optional target formula."""
+
+    formula = structure.composition.formula
+    reduced_formula = structure.composition.reduced_formula
+    if not target_formula:
+        return CompositionResult(
+            target_formula=None,
+            formula=formula,
+            reduced_formula=reduced_formula,
+            target_formula_match=None,
+        )
+
+    try:
+        target_reduced = Composition(target_formula).reduced_formula
+    except Exception as exc:
+        return CompositionResult(
+            target_formula=target_formula,
+            formula=formula,
+            reduced_formula=reduced_formula,
+            target_formula_match=False,
+            composition_error=f"{type(exc).__name__}: {exc}",
+        )
+
+    return CompositionResult(
+        target_formula=target_formula,
+        formula=formula,
+        reduced_formula=reduced_formula,
+        target_reduced_formula=target_reduced,
+        target_formula_match=reduced_formula == target_reduced,
+    )
+
+```
+
+
+================================================================================
+=== FILE: sca\evaluators\geometry.py ===
+================================================================================
+
+```python
+"""Basic geometry checks."""
+
+from __future__ import annotations
+
+from pymatgen.core import Structure
+
+from sca.schemas import GeometryResult
+
+
+def evaluate_geometry(structure: Structure) -> GeometryResult:
+    warnings: list[str] = []
+    errors: list[str] = []
+    volume = float(structure.volume)
+    density = float(structure.density)
+    volume_per_atom = volume / len(structure) if len(structure) else None
+    lattice = structure.lattice
+
+    if volume_per_atom is not None and volume_per_atom < 3:
+        warnings.append("volume_per_atom below 3 A^3")
+    if volume_per_atom is not None and volume_per_atom > 120:
+        warnings.append("volume_per_atom above 120 A^3")
+    if density <= 0:
+        errors.append("density <= 0")
+    if density > 30:
+        warnings.append("density above 30 g/cm^3")
+    if any(length <= 0 for length in (lattice.a, lattice.b, lattice.c)):
+        errors.append("lattice length <= 0")
+    if any(angle <= 0 or angle >= 180 for angle in (lattice.alpha, lattice.beta, lattice.gamma)):
+        errors.append("lattice angle outside (0, 180)")
+
+    geometry_ok = not errors
+    return GeometryResult(
+        geometry_ok=geometry_ok,
+        volume=volume,
+        volume_per_atom=volume_per_atom,
+        density=density,
+        geometry_warning_count=len(warnings),
+        geometry_warnings=warnings,
+        geometry_error="; ".join(errors) if errors else None,
+    )
+
+```
+
+
+================================================================================
+=== FILE: sca\evaluators\multiplicity.py ===
+================================================================================
+
+```python
+"""Atom-site multiplicity checks."""
+
+from __future__ import annotations
+
+import re
+
+from pymatgen.core import Structure
+
+from sca.schemas import MultiplicityResult
+
+
+def evaluate_multiplicity(structure: Structure, cif_text: str | None) -> MultiplicityResult:
+    site_count = len(structure)
+    if not cif_text or "_atom_site_symmetry_multiplicity" not in cif_text:
+        return MultiplicityResult(
+            multiplicity_checked=False,
+            multiplicity_consistent=None,
+            site_count=site_count,
+        )
+
+    try:
+        values = _extract_multiplicity_values(cif_text)
+        if not values:
+            return MultiplicityResult(
+                multiplicity_checked=False,
+                multiplicity_consistent=None,
+                site_count=site_count,
+            )
+        declared = sum(values)
+        return MultiplicityResult(
+            multiplicity_checked=True,
+            multiplicity_consistent=declared == site_count,
+            declared_atom_count=declared,
+            expanded_atom_count=declared,
+            site_count=site_count,
+        )
+    except Exception as exc:
+        return MultiplicityResult(
+            multiplicity_checked=True,
+            multiplicity_consistent=None,
+            site_count=site_count,
+            multiplicity_error=f"{type(exc).__name__}: {exc}",
+        )
+
+
+def _extract_multiplicity_values(cif_text: str) -> list[int]:
+    lines = cif_text.splitlines()
+    values: list[int] = []
+    cursor = 0
+    while cursor < len(lines):
+        if lines[cursor].strip().lower() != "loop_":
+            cursor += 1
+            continue
+        cursor += 1
+        headers: list[str] = []
+        while cursor < len(lines) and lines[cursor].strip().startswith("_"):
+            headers.append(lines[cursor].strip())
+            cursor += 1
+        lower_headers = [header.lower() for header in headers]
+        if "_atom_site_symmetry_multiplicity" not in lower_headers:
+            continue
+        multiplicity_index = lower_headers.index("_atom_site_symmetry_multiplicity")
+        while cursor < len(lines):
+            row = lines[cursor].strip()
+            if not row or row.startswith("_") or row.lower().startswith("loop_"):
+                break
+            tokens = re.findall(r"'[^']*'|\"[^\"]*\"|\S+", row)
+            if len(tokens) > multiplicity_index:
+                values.append(int(float(tokens[multiplicity_index].strip("'\""))))
+            cursor += 1
+    return values
+
+```
+
+
+================================================================================
+=== FILE: sca\evaluators\novelty.py ===
+================================================================================
+
+```python
+"""Novelty checks against a reference structure corpus."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from dataclasses import dataclass
+
+import pandas as pd
+from pymatgen.analysis.structure_matcher import StructureMatcher
+from pymatgen.core import Structure
+
+from sca.evaluators.cif_parse import parse_cif
+from sca.schemas import NoveltyResult
+
+
+@dataclass(frozen=True)
+class ReferenceLoadResult:
+    structures: dict[str, Structure]
+    loaded_count: int
+    failed_count: int
+
+
+def load_reference_structures(
+    reference_folder: str | Path | None = None,
+    reference_manifest: str | Path | None = None,
+    path_col: str = "cif_path",
+    id_col: str | None = None,
+) -> dict[str, Structure]:
+    return load_reference_structures_with_stats(
+        reference_folder=reference_folder,
+        reference_manifest=reference_manifest,
+        path_col=path_col,
+        id_col=id_col,
+    ).structures
+
+
+def load_reference_structures_with_stats(
+    reference_folder: str | Path | None = None,
+    reference_manifest: str | Path | None = None,
+    path_col: str = "cif_path",
+    id_col: str | None = None,
+) -> ReferenceLoadResult:
+    references: dict[str, Structure] = {}
+    paths: list[tuple[str, Path]] = []
+
+    if reference_folder:
+        folder = Path(reference_folder)
+        paths.extend((str(path), path) for path in sorted(folder.rglob("*.cif")))
+
+    if reference_manifest:
+        manifest = Path(reference_manifest)
+        frame = pd.read_csv(manifest)
+        if path_col not in frame.columns:
+            raise ValueError(f"Reference manifest path column '{path_col}' not found")
+        for index, row in frame.iterrows():
+            raw_path = Path(str(row[path_col]))
+            path = raw_path if raw_path.is_absolute() else (manifest.parent / raw_path).resolve()
+            ref_id = str(row[id_col]) if id_col and id_col in frame.columns else str(path)
+            paths.append((ref_id, path))
+
+    for ref_id, path in paths:
+        structure, parsed = parse_cif(path)
+        if parsed.parse_ok and structure is not None:
+            references[ref_id] = structure
+    return ReferenceLoadResult(
+        structures=references,
+        loaded_count=len(references),
+        failed_count=len(paths) - len(references),
+    )
+
+
+def evaluate_novelty(
+    structure: Structure,
+    reference_structures: dict[str, Structure] | None,
+    matcher: StructureMatcher | None = None,
+) -> NoveltyResult:
+    if not reference_structures:
+        return NoveltyResult(novelty_checked=False)
+
+    matcher = matcher or StructureMatcher(
+        ltol=0.2,
+        stol=0.3,
+        angle_tol=5,
+        primitive_cell=True,
+        scale=True,
+        attempt_supercell=True,
+    )
+    try:
+        for ref_id, reference in reference_structures.items():
+            if matcher.fit(structure, reference):
+                return NoveltyResult(
+                    novelty_checked=True,
+                    nearest_reference_id=ref_id,
+                    known_match=True,
+                    novel_by_structure_matcher=False,
+                )
+        return NoveltyResult(
+            novelty_checked=True,
+            known_match=False,
+            novel_by_structure_matcher=True,
+        )
+    except Exception as exc:
+        return NoveltyResult(
+            novelty_checked=True,
+            novelty_error=f"{type(exc).__name__}: {exc}",
+        )
+
+```
+
+
+================================================================================
+=== FILE: sca\evaluators\symmetry.py ===
+================================================================================
+
+```python
+"""Space-group extraction and consistency checks."""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Sequence
+
+from pymatgen.core import Structure
+from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+
+from sca.schemas import SymmetryResult
+
+
+DECLARED_SYMBOL_FIELDS = (
+    "_symmetry_space_group_name_H-M",
+    "_space_group_name_H-M_alt",
+)
+DECLARED_NUMBER_FIELDS = ("_space_group_IT_number", "_symmetry_Int_Tables_number")
+
+
+def evaluate_symmetry(
+    structure: Structure,
+    cif_text: str | None,
+    target_space_group: str | None,
+    symprec_values: Sequence[float] = (0.01, 0.1, 0.2),
+) -> SymmetryResult:
+    declared_symbol, declared_number = _extract_declared_space_group(cif_text)
+    result = SymmetryResult(
+        declared_space_group=declared_symbol,
+        declared_space_group_number=declared_number,
+        target_space_group=target_space_group,
+    )
+
+    last_error: Exception | None = None
+    for symprec in symprec_values:
+        try:
+            analyzer = SpacegroupAnalyzer(structure, symprec=symprec, angle_tolerance=5)
+            detected_symbol = analyzer.get_space_group_symbol()
+            detected_number = analyzer.get_space_group_number()
+            consistent = _space_group_consistent(
+                detected_symbol,
+                detected_number,
+                target_space_group,
+                declared_symbol,
+                declared_number,
+            )
+            return result.model_copy(
+                update={
+                    "detected_space_group": detected_symbol,
+                    "detected_space_group_number": detected_number,
+                    "space_group_consistent": consistent,
+                    "symprec_used": float(symprec),
+                    "angle_tolerance_used": 5.0,
+                }
+            )
+        except Exception as exc:
+            last_error = exc
+
+    return result.model_copy(
+        update={
+            "symmetry_error": None if last_error is None else f"{type(last_error).__name__}: {last_error}",
+        }
+    )
+
+
+def _extract_declared_space_group(cif_text: str | None) -> tuple[str | None, int | None]:
+    if not cif_text:
+        return None, None
+
+    symbol = None
+    number = None
+    for field in DECLARED_SYMBOL_FIELDS:
+        match = re.search(rf"^{re.escape(field)}\s+(.+)$", cif_text, flags=re.IGNORECASE | re.MULTILINE)
+        if match:
+            symbol = _strip_cif_value(match.group(1))
+            break
+    for field in DECLARED_NUMBER_FIELDS:
+        match = re.search(rf"^{re.escape(field)}\s+([0-9]+)", cif_text, flags=re.IGNORECASE | re.MULTILINE)
+        if match:
+            number = int(match.group(1))
+            break
+    return symbol, number
+
+
+def _space_group_consistent(
+    detected_symbol: str | None,
+    detected_number: int | None,
+    target: str | None,
+    declared_symbol: str | None,
+    declared_number: int | None,
+) -> bool | None:
+    if target:
+        target_number = _parse_int(target)
+        if target_number is not None and detected_number is not None:
+            return target_number == detected_number
+        return _normalize_space_group(target) == _normalize_space_group(detected_symbol)
+    if declared_number is not None and detected_number is not None:
+        return declared_number == detected_number
+    if declared_symbol:
+        return _normalize_space_group(declared_symbol) == _normalize_space_group(detected_symbol)
+    return None
+
+
+def _strip_cif_value(value: str) -> str:
+    return value.strip().strip("'\"")
+
+
+def _normalize_space_group(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.replace("−", "-").replace("_", "").replace(" ", "").replace("'", "").replace('"', "")
+    return normalized.lower()
+
+
+def _parse_int(value: str) -> int | None:
+    try:
+        return int(str(value).strip())
+    except ValueError:
+        return None
+
+```
+
+
+================================================================================
+=== FILE: sca\evaluators\uniqueness.py ===
+================================================================================
+
+```python
+"""Duplicate grouping with pymatgen StructureMatcher."""
+
+from __future__ import annotations
+
+from pymatgen.core import Structure
+from pymatgen.analysis.structure_matcher import StructureMatcher
+
+from sca.schemas import CrystalEvalRecord
+from sca.scoring import compute_rank_score
+
+
+def assign_duplicate_groups(
+    records: list[CrystalEvalRecord],
+    structures: dict[str, Structure],
+) -> list[CrystalEvalRecord]:
+    matcher = StructureMatcher(
+        ltol=0.2,
+        stol=0.3,
+        angle_tol=5,
+        primitive_cell=True,
+        scale=True,
+        attempt_supercell=True,
+    )
+    groups: list[list[CrystalEvalRecord]] = []
+    group_structures: list[Structure] = []
+
+    for record in records:
+        structure = structures.get(record.input_path)
+        if not record.parse_ok or structure is None:
+            continue
+        placed = False
+        for group_index, representative in enumerate(group_structures):
+            if matcher.fit(structure, representative):
+                groups[group_index].append(record)
+                placed = True
+                break
+        if not placed:
+            groups.append([record])
+            group_structures.append(structure)
+
+    updates: dict[str, CrystalEvalRecord] = {}
+    for index, group in enumerate(groups, start=1):
+        group_id = f"dup-{index:04d}"
+        group_size = len(group)
+        for member_index, record in enumerate(group):
+            updated = record.model_copy(
+                update={
+                    "duplicate_group_id": group_id,
+                    "is_duplicate": group_size > 1,
+                    "is_unique_representative": member_index == 0,
+                    "num_duplicates_in_group": group_size,
+                }
+            )
+            updated = updated.model_copy(update={"pre_dft_rank_score": compute_rank_score(updated)})
+            updates[record.input_path] = updated
+
+    return [updates.get(record.input_path, record) for record in records]
+
+```
+
+
+================================================================================
+=== FILE: sca\evaluators\__init__.py ===
+================================================================================
+
+```python
+"""Evaluator implementations."""
+
+from sca.evaluators.alignn import AlignnEvaluator
+from sca.evaluators.base import CrystalEvaluator
+from sca.evaluators.cif_parse import parse_cif
+
+__all__ = ["AlignnEvaluator", "CrystalEvaluator", "parse_cif"]
+
+```
+
+
+================================================================================
+=== FILE: sca\pipelines\crystallm_style.py ===
+================================================================================
+
+```python
+"""CrystaLLM-style pre-DFT evaluation pipeline."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from uuid import uuid4
+
+from pymatgen.core import Structure
+
+from sca.evaluators.alignn import predict_alignn_formation_energy
+from sca.evaluators.bonds import evaluate_bonds
+from sca.evaluators.cif_parse import parse_cif
+from sca.evaluators.composition import evaluate_composition
+from sca.evaluators.geometry import evaluate_geometry
+from sca.evaluators.multiplicity import evaluate_multiplicity
+from sca.evaluators.novelty import evaluate_novelty
+from sca.evaluators.symmetry import evaluate_symmetry
+from sca.scoring import compute_pre_dft_valid, compute_rank_score
+from sca.schemas import (
+    AlignnResult,
+    BondResult,
+    CompositionResult,
+    CrystalEvalRecord,
+    GeometryResult,
+    MultiplicityResult,
+    NoveltyResult,
+    SymmetryResult,
+)
+
+
+def evaluate_one_cif(
+    cif_path: str | Path,
+    target_formula: str | None = None,
+    target_space_group: str | None = None,
+    method: str | None = None,
+    query_id: str | None = None,
+    require_spacegroup: bool = False,
+    run_alignn: bool = False,
+    reference_structures: dict[str, Structure] | None = None,
+    run_id: str | None = None,
+) -> tuple[CrystalEvalRecord, Structure | None]:
+    path = Path(cif_path)
+    run_id = run_id or str(uuid4())
+    cif_text = _read_text(path)
+    structure, parse = parse_cif(path)
+
+    if structure is None:
+        record = CrystalEvalRecord(
+            run_id=run_id,
+            method=method,
+            query_id=query_id,
+            input_path=str(path),
+            file_name=path.name,
+            parse_ok=False,
+            target_formula=target_formula,
+            target_space_group=target_space_group,
+            error_type=parse.error_type,
+            error_message=parse.error_message,
+        )
+        record = record.model_copy(
+            update={
+                "pre_dft_valid": compute_pre_dft_valid(record, require_spacegroup),
+                "pre_dft_rank_score": compute_rank_score(record),
+            }
+        )
+        return record, None
+
+    composition = evaluate_composition(structure, target_formula)
+    symmetry = evaluate_symmetry(structure, cif_text, target_space_group)
+    multiplicity = evaluate_multiplicity(structure, cif_text)
+    bonds = evaluate_bonds(structure)
+    geometry = evaluate_geometry(structure)
+    novelty = evaluate_novelty(structure, reference_structures)
+    alignn = (
+        predict_alignn_formation_energy(path)
+        if run_alignn
+        else AlignnResult(alignn_ok=False)
+    )
+
+    record = _build_record(
+        path=path,
+        run_id=run_id,
+        method=method,
+        query_id=query_id,
+        parse=parse,
+        composition=composition,
+        symmetry=symmetry,
+        multiplicity=multiplicity,
+        bonds=bonds,
+        geometry=geometry,
+        novelty=novelty,
+        alignn=alignn,
+    )
+    record = record.model_copy(
+        update={
+            "pre_dft_valid": compute_pre_dft_valid(record, require_spacegroup),
+        }
+    )
+    record = record.model_copy(update={"pre_dft_rank_score": compute_rank_score(record)})
+    return record, structure
+
+
+def _build_record(
+    path: Path,
+    run_id: str,
+    method: str | None,
+    query_id: str | None,
+    parse,
+    composition: CompositionResult,
+    symmetry: SymmetryResult,
+    multiplicity: MultiplicityResult,
+    bonds: BondResult,
+    geometry: GeometryResult,
+    novelty: NoveltyResult,
+    alignn: AlignnResult,
+) -> CrystalEvalRecord:
+    error_type, error_message = _first_error(parse, composition, symmetry, multiplicity, bonds, geometry, novelty, alignn)
+    return CrystalEvalRecord(
+        run_id=run_id,
+        method=method,
+        query_id=query_id,
+        input_path=str(path),
+        file_name=path.name,
+        parse_ok=parse.parse_ok,
+        formula=parse.formula,
+        reduced_formula=parse.reduced_formula,
+        target_formula=composition.target_formula,
+        target_formula_match=composition.target_formula_match,
+        declared_space_group=symmetry.declared_space_group,
+        detected_space_group=symmetry.detected_space_group,
+        target_space_group=symmetry.target_space_group,
+        space_group_consistent=symmetry.space_group_consistent,
+        multiplicity_checked=multiplicity.multiplicity_checked,
+        multiplicity_consistent=multiplicity.multiplicity_consistent,
+        bond_reasonableness_score=bonds.bond_reasonableness_score,
+        bond_lengths_reasonable=bonds.bond_lengths_reasonable,
+        min_distance=bonds.min_distance,
+        min_distance_pair=bonds.min_distance_pair,
+        num_bad_contacts=bonds.num_bad_contacts,
+        volume=geometry.volume,
+        volume_per_atom=geometry.volume_per_atom,
+        density=geometry.density,
+        geometry_ok=geometry.geometry_ok,
+        geometry_warning_count=geometry.geometry_warning_count,
+        novelty_checked=novelty.novelty_checked,
+        nearest_reference_id=novelty.nearest_reference_id,
+        known_match=novelty.known_match,
+        novel_by_structure_matcher=novelty.novel_by_structure_matcher,
+        novelty_error=novelty.novelty_error,
+        alignn_ok=alignn.alignn_ok,
+        alignn_model=alignn.alignn_model,
+        formation_energy_per_atom=alignn.formation_energy_per_atom,
+        error_type=error_type,
+        error_message=error_message,
+    )
+
+
+def _first_error(*results) -> tuple[str | None, str | None]:
+    fields = (
+        ("error_type", "error_message"),
+        ("composition_error", "composition_error"),
+        ("symmetry_error", "symmetry_error"),
+        ("multiplicity_error", "multiplicity_error"),
+        ("bond_error", "bond_error"),
+        ("geometry_error", "geometry_error"),
+        ("novelty_error", "novelty_error"),
+        ("alignn_error", "alignn_error"),
+    )
+    for result in results:
+        for type_field, message_field in fields:
+            message = getattr(result, message_field, None)
+            if message:
+                error_type = getattr(result, type_field, None)
+                return error_type or message.split(":", 1)[0], message
+    return None, None
+
+
+def _read_text(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return path.read_text(errors="replace")
+    except Exception:
+        return None
+
+```
+
+
+================================================================================
+=== FILE: sca\pipelines\__init__.py ===
+================================================================================
+
+```python
+"""Evaluation pipelines."""
+
+from sca.pipelines.crystallm_style import evaluate_one_cif
+
+__all__ = ["evaluate_one_cif"]
+
+```
+
+
+================================================================================
+=== FILE: tests\test_alignn_mock.py ===
+================================================================================
+
+```python
+from pathlib import Path
+
+from sca.batch import evaluate_many, evaluate_one
+from sca.evaluators.alignn import AlignnEvaluator
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_alignn_evaluator_with_mock_predictor() -> None:
+    evaluator = AlignnEvaluator(model_name="mock-alignn", predictor=lambda structure, path: -2.5)
+
+    result = evaluate_one(FIXTURES / "tiny_valid.cif", evaluator)
+
+    assert result.parse_ok is True
+    assert result.alignn_ok is True
+    assert result.alignn_model == "mock-alignn"
+    assert result.formation_energy_per_atom == -2.5
+    assert result.error_type is None
+
+
+def test_alignn_failure_is_structured() -> None:
+    def failing_predictor(structure, path):
+        raise RuntimeError("model unavailable")
+
+    evaluator = AlignnEvaluator(model_name="mock-alignn", predictor=failing_predictor)
+
+    result = evaluate_one(FIXTURES / "tiny_valid.cif", evaluator)
+
+    assert result.parse_ok is True
+    assert result.alignn_ok is False
+    assert result.error_type == "RuntimeError"
+    assert result.error_message == "model unavailable"
+
+
+def test_batch_returns_partial_results_for_failed_parse() -> None:
+    evaluator = AlignnEvaluator(model_name="mock-alignn", predictor=lambda structure, path: -2.5)
+
+    results = evaluate_many(
+        [FIXTURES / "tiny_valid.cif", FIXTURES / "malformed.cif"],
+        evaluator,
+        show_progress=False,
+    )
+
+    assert [result.parse_ok for result in results] == [True, False]
+    assert [result.alignn_ok for result in results] == [True, False]
+
+```
+
+
+================================================================================
+=== FILE: tests\test_bonds.py ===
+================================================================================
+
+```python
+from pathlib import Path
+
+from sca.evaluators.bonds import evaluate_bonds
+from sca.evaluators.cif_parse import parse_cif
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_bond_evaluator_detects_short_contact() -> None:
+    structure, _ = parse_cif(FIXTURES / "short_contact.cif")
+
+    result = evaluate_bonds(structure)
+
+    assert result.bond_lengths_reasonable is False
+    assert result.num_bad_contacts > 0
+    assert result.min_distance is not None
+
+```
+
+
+================================================================================
+=== FILE: tests\test_cif_parse.py ===
+================================================================================
+
+```python
+from pathlib import Path
+
+from sca.evaluators.cif_parse import parse_cif
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_valid_cif_parse_result() -> None:
+    structure, result = parse_cif(FIXTURES / "tiny_valid.cif")
+
+    assert structure is not None
+    assert result.parse_ok is True
+    assert result.reduced_formula == "NaCl"
+    assert result.lattice_a is not None
+
+
+def test_malformed_cif_parse_result() -> None:
+    structure, result = parse_cif(FIXTURES / "malformed.cif")
+
+    assert structure is None
+    assert result.parse_ok is False
+    assert result.error_type is not None
+
+```
+
+
+================================================================================
+=== FILE: tests\test_cli.py ===
+================================================================================
+
+```python
+from pathlib import Path
+
+import pandas as pd
+from typer.testing import CliRunner
+
+from sca.cli import app
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+runner = CliRunner()
+
+
+def test_cli_help_commands_work() -> None:
+    for args in (["--help"], ["crystallm-eval", "--help"], ["crystallm-eval", "manifest", "--help"]):
+        result = runner.invoke(app, args)
+        assert result.exit_code == 0
+
+
+def test_folder_mode_writes_csv_and_jsonl(tmp_path: Path) -> None:
+    cif_dir = tmp_path / "cifs"
+    cif_dir.mkdir()
+    (cif_dir / "tiny_valid.cif").write_text((FIXTURES / "tiny_valid.cif").read_text(encoding="utf-8"), encoding="utf-8")
+    csv_out = tmp_path / "eval.csv"
+    jsonl_out = tmp_path / "eval.jsonl"
+
+    result = runner.invoke(
+        app,
+        [
+            "crystallm-eval",
+            "folder",
+            str(cif_dir),
+            "--target-formula",
+            "NaCl",
+            "--out",
+            str(csv_out),
+            "--jsonl",
+            str(jsonl_out),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert csv_out.exists()
+    assert jsonl_out.exists()
+    assert pd.read_csv(csv_out)["parse_ok"].tolist() == [True]
+
+
+def test_manifest_mode_writes_csv_and_jsonl(tmp_path: Path) -> None:
+    cif_dir = tmp_path / "cifs"
+    cif_dir.mkdir()
+    (cif_dir / "tiny_valid.cif").write_text((FIXTURES / "tiny_valid.cif").read_text(encoding="utf-8"), encoding="utf-8")
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text(
+        "cif_path,target_formula,target_space_group,method,query_id\ncifs/tiny_valid.cif,NaCl,1,m,q\n",
+        encoding="utf-8",
+    )
+    csv_out = tmp_path / "eval.csv"
+    jsonl_out = tmp_path / "eval.jsonl"
+
+    result = runner.invoke(
+        app,
+        [
+            "crystallm-eval",
+            "manifest",
+            str(manifest),
+            "--out",
+            str(csv_out),
+            "--jsonl",
+            str(jsonl_out),
+        ],
+    )
+
+    assert result.exit_code == 0
+    frame = pd.read_csv(csv_out)
+    assert frame["method"].tolist() == ["m"]
+    assert jsonl_out.read_text(encoding="utf-8").count("\n") == 1
+
+
+def test_cli_reference_folder_novelty_finds_known_match(tmp_path: Path) -> None:
+    candidate_dir = tmp_path / "candidates"
+    reference_dir = tmp_path / "references"
+    candidate_dir.mkdir()
+    reference_dir.mkdir()
+    (candidate_dir / "tiny_valid.cif").write_text(
+        (FIXTURES / "tiny_valid_copy.cif").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (reference_dir / "reference.cif").write_text(
+        (FIXTURES / "tiny_valid.cif").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    csv_out = tmp_path / "eval.csv"
+    jsonl_out = tmp_path / "eval.jsonl"
+
+    result = runner.invoke(
+        app,
+        [
+            "crystallm-eval",
+            "folder",
+            str(candidate_dir),
+            "--novelty",
+            "true",
+            "--reference-folder",
+            str(reference_dir),
+            "--out",
+            str(csv_out),
+            "--jsonl",
+            str(jsonl_out),
+        ],
+    )
+
+    assert result.exit_code == 0
+    frame = pd.read_csv(csv_out)
+    assert frame["novelty_checked"].tolist() == [True]
+    assert frame["known_match"].tolist() == [True]
+    assert frame["novel_by_structure_matcher"].tolist() == [False]
+    assert "novelty_error" in frame.columns
+
+
+def test_cli_reference_manifest_novelty_finds_known_match(tmp_path: Path) -> None:
+    candidate_dir = tmp_path / "candidates"
+    reference_dir = tmp_path / "references"
+    candidate_dir.mkdir()
+    reference_dir.mkdir()
+    (candidate_dir / "tiny_valid.cif").write_text(
+        (FIXTURES / "tiny_valid_copy.cif").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (reference_dir / "reference.cif").write_text(
+        (FIXTURES / "tiny_valid.cif").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text("cif_path,ref_id\nreferences/reference.cif,ref-1\n", encoding="utf-8")
+    csv_out = tmp_path / "one.csv"
+
+    result = runner.invoke(
+        app,
+        [
+            "crystallm-eval",
+            "one",
+            str(candidate_dir / "tiny_valid.cif"),
+            "--novelty",
+            "true",
+            "--reference-manifest",
+            str(manifest),
+            "--reference-id-col",
+            "ref_id",
+            "--out",
+            str(csv_out),
+        ],
+    )
+
+    assert result.exit_code == 0
+    frame = pd.DataFrame([pd.read_json(csv_out, typ="series")])
+    assert frame["nearest_reference_id"].tolist() == ["ref-1"]
+    assert frame["known_match"].tolist() == [True]
+
+
+def test_cli_novelty_without_reference_fails_clearly(tmp_path: Path) -> None:
+    output = tmp_path / "one.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "crystallm-eval",
+            "one",
+            str(FIXTURES / "tiny_valid.cif"),
+            "--novelty",
+            "true",
+            "--out",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--novelty true requires --reference-folder or --reference-manifest" in result.output
+
+
+def test_bad_reference_cif_does_not_crash_batch(tmp_path: Path) -> None:
+    candidate_dir = tmp_path / "candidates"
+    reference_dir = tmp_path / "references"
+    candidate_dir.mkdir()
+    reference_dir.mkdir()
+    (candidate_dir / "tiny_valid.cif").write_text(
+        (FIXTURES / "tiny_valid.cif").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (reference_dir / "bad.cif").write_text(
+        (FIXTURES / "malformed.cif").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    csv_out = tmp_path / "eval.csv"
+    jsonl_out = tmp_path / "eval.jsonl"
+
+    result = runner.invoke(
+        app,
+        [
+            "crystallm-eval",
+            "folder",
+            str(candidate_dir),
+            "--novelty",
+            "true",
+            "--reference-folder",
+            str(reference_dir),
+            "--out",
+            str(csv_out),
+            "--jsonl",
+            str(jsonl_out),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "0 loaded, 1 failed" in result.output
+    frame = pd.read_csv(csv_out)
+    assert frame["novelty_checked"].tolist() == [False]
+
+
+def test_select_top_k_and_summarize(tmp_path: Path) -> None:
+    eval_csv = tmp_path / "eval.csv"
+    pd.DataFrame(
+        [
+            {"method": "m", "query_id": "q", "pre_dft_rank_score": 2, "pre_dft_valid": True, "parse_ok": True},
+            {"method": "m", "query_id": "q", "pre_dft_rank_score": 1, "pre_dft_valid": True, "parse_ok": True},
+            {"method": "m", "query_id": "q", "pre_dft_rank_score": 3, "pre_dft_valid": False, "parse_ok": False},
+        ]
+    ).to_csv(eval_csv, index=False)
+    top_out = tmp_path / "top.csv"
+    summary_out = tmp_path / "summary.csv"
+
+    top_result = runner.invoke(
+        app,
+        ["select-top-k", str(eval_csv), "--group-cols", "method,query_id", "--k", "1", "--out", str(top_out)],
+    )
+    summary_result = runner.invoke(
+        app,
+        ["summarize", str(eval_csv), "--group-col", "method", "--out", str(summary_out)],
+    )
+
+    assert top_result.exit_code == 0
+    assert pd.read_csv(top_out)["pre_dft_rank_score"].tolist() == [1]
+    assert summary_result.exit_code == 0
+    assert pd.read_csv(summary_out)["num_generated"].tolist() == [3]
+
+```
+
+
+================================================================================
+=== FILE: tests\test_composition.py ===
+================================================================================
+
+```python
+from pathlib import Path
+
+from sca.evaluators.cif_parse import parse_cif
+from sca.evaluators.composition import evaluate_composition
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_composition_target_match_equivalent_reduced_formula() -> None:
+    structure, _ = parse_cif(FIXTURES / "tiny_valid.cif")
+
+    result = evaluate_composition(structure, "Na2Cl2")
+
+    assert result.target_reduced_formula == "NaCl"
+    assert result.target_formula_match is True
+
+
+def test_composition_mismatch_detected() -> None:
+    structure, _ = parse_cif(FIXTURES / "tiny_valid.cif")
+
+    result = evaluate_composition(structure, "LiCl")
+
+    assert result.target_formula_match is False
+
+```
+
+
+================================================================================
+=== FILE: tests\test_crystallm_style_pipeline.py ===
+================================================================================
+
+```python
+from pathlib import Path
+
+from sca.pipelines.crystallm_style import evaluate_one_cif
+from sca.schemas import AlignnResult
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_crystallm_pipeline_valid_record() -> None:
+    record, structure = evaluate_one_cif(FIXTURES / "tiny_valid.cif", target_formula="NaCl")
+
+    assert structure is not None
+    assert record.parse_ok is True
+    assert record.target_formula_match is True
+    assert record.pre_dft_valid is True
+
+
+def test_crystallm_pipeline_alignn_is_mockable(monkeypatch) -> None:
+    def fake_predict(path, model_name="mp_e_form_alignn"):
+        return AlignnResult(
+            alignn_ok=True,
+            alignn_model=model_name,
+            formation_energy_per_atom=-3.0,
+        )
+
+    monkeypatch.setattr("sca.pipelines.crystallm_style.predict_alignn_formation_energy", fake_predict)
+
+    record, _ = evaluate_one_cif(FIXTURES / "tiny_valid.cif", run_alignn=True)
+
+    assert record.alignn_ok is True
+    assert record.formation_energy_per_atom == -3.0
+
+```
+
+
+================================================================================
+=== FILE: tests\test_geometry.py ===
+================================================================================
+
+```python
+from pathlib import Path
+
+from sca.evaluators.cif_parse import parse_cif
+from sca.evaluators.geometry import evaluate_geometry
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_geometry_computes_volume_per_atom_and_density() -> None:
+    structure, _ = parse_cif(FIXTURES / "tiny_valid.cif")
+
+    result = evaluate_geometry(structure)
+
+    assert result.volume_per_atom is not None
+    assert result.density is not None
+    assert result.geometry_ok is True
+
+```
+
+
+================================================================================
+=== FILE: tests\test_io.py ===
+================================================================================
+
+```python
+from pathlib import Path
+
+import pytest
+
+from sca.io import load_manifest, parse_cif
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_parse_tiny_valid_cif() -> None:
+    metadata, structure = parse_cif(FIXTURES / "tiny_valid.cif")
+
+    assert metadata.parse_ok is True
+    assert structure is not None
+    assert metadata.formula == "Na1 Cl1"
+    assert metadata.reduced_formula == "NaCl"
+    assert metadata.n_sites == 2
+    assert metadata.volume is not None
+    assert metadata.density is not None
+    assert metadata.error_type is None
+
+
+def test_parse_malformed_cif_returns_structured_error() -> None:
+    metadata, structure = parse_cif(FIXTURES / "malformed.cif")
+
+    assert metadata.parse_ok is False
+    assert structure is None
+    assert metadata.error_type is not None
+    assert metadata.error_message is not None
+
+
+def test_load_manifest_resolves_relative_paths(tmp_path: Path) -> None:
+    cif_dir = tmp_path / "cifs"
+    cif_dir.mkdir()
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text("cif_path\ncifs/example.cif\n", encoding="utf-8")
+
+    paths = load_manifest(manifest, "cif_path")
+
+    assert paths == [(tmp_path / "cifs" / "example.cif").resolve()]
+
+
+def test_load_manifest_rejects_missing_path_column(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text("other\nx.cif\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="cif_path"):
+        load_manifest(manifest, "cif_path")
+
+```
+
+
+================================================================================
+=== FILE: tests\test_multiplicity.py ===
+================================================================================
+
+```python
+from pathlib import Path
+
+from sca.evaluators.cif_parse import parse_cif
+from sca.evaluators.multiplicity import evaluate_multiplicity
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_multiplicity_missing_field_does_not_fail() -> None:
+    path = FIXTURES / "tiny_valid.cif"
+    structure, _ = parse_cif(path)
+
+    result = evaluate_multiplicity(structure, path.read_text(encoding="utf-8"))
+
+    assert result.multiplicity_checked is False
+    assert result.multiplicity_consistent is None
+
+
+def test_multiplicity_detects_explicit_inconsistency() -> None:
+    path = FIXTURES / "multiplicity_bad.cif"
+    structure, _ = parse_cif(path)
+
+    result = evaluate_multiplicity(structure, path.read_text(encoding="utf-8"))
+
+    assert result.multiplicity_checked is True
+    assert result.multiplicity_consistent is False
+
+```
+
+
+================================================================================
+=== FILE: tests\test_novelty.py ===
+================================================================================
+
+```python
+from pathlib import Path
+
+from sca.evaluators.cif_parse import parse_cif
+from sca.evaluators.novelty import evaluate_novelty, load_reference_structures
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_novelty_finds_known_match_in_reference_folder(tmp_path: Path) -> None:
+    reference = tmp_path / "reference.cif"
+    reference.write_text((FIXTURES / "tiny_valid.cif").read_text(encoding="utf-8"), encoding="utf-8")
+    references = load_reference_structures(reference_folder=tmp_path)
+    structure, _ = parse_cif(FIXTURES / "tiny_valid_copy.cif")
+
+    result = evaluate_novelty(structure, references)
+
+    assert result.novelty_checked is True
+    assert result.known_match is True
+    assert result.novel_by_structure_matcher is False
+
+```
+
+
+================================================================================
+=== FILE: tests\test_schemas.py ===
+================================================================================
+
+```python
+from sca.schemas import CifMetadata, CrystalEvaluationResult, EvaluatorResult
+
+
+def test_result_schema_serialization() -> None:
+    cif = CifMetadata(
+        input_path="sample.cif",
+        file_name="sample.cif",
+        parse_ok=True,
+        formula="Na1 Cl1",
+        reduced_formula="NaCl",
+        n_sites=2,
+        volume=179.4,
+        density=2.16,
+    )
+    alignn = EvaluatorResult(
+        ok=True,
+        model="mock-alignn",
+        values={"formation_energy_per_atom": -1.23},
+    )
+
+    result = CrystalEvaluationResult.from_parts(cif, alignn)
+    payload = result.model_dump()
+
+    assert payload["input_path"] == "sample.cif"
+    assert payload["alignn_ok"] is True
+    assert payload["formation_energy_per_atom"] == -1.23
+    assert "formation_energy_per_atom" in result.model_dump_json()
+
+```
+
+
+================================================================================
+=== FILE: tests\test_symmetry.py ===
+================================================================================
+
+```python
+from pathlib import Path
+
+from sca.evaluators.cif_parse import parse_cif
+from sca.evaluators.symmetry import evaluate_symmetry
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_symmetry_detects_simple_space_group() -> None:
+    path = FIXTURES / "tiny_valid.cif"
+    structure, _ = parse_cif(path)
+
+    result = evaluate_symmetry(structure, path.read_text(encoding="utf-8"), "1")
+
+    assert result.detected_space_group is not None
+    assert result.detected_space_group_number is not None
+    assert result.symprec_used is not None
+
+```
+
+
+================================================================================
+=== FILE: tests\test_uniqueness.py ===
+================================================================================
+
+```python
+from pathlib import Path
+
+from sca.batch import evaluate_folder
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_uniqueness_groups_duplicate_cifs(tmp_path: Path) -> None:
+    for name in ("tiny_valid.cif", "tiny_valid_copy.cif"):
+        (tmp_path / name).write_text((FIXTURES / name).read_text(encoding="utf-8"), encoding="utf-8")
+
+    records = evaluate_folder(tmp_path, target_formula="NaCl")
+
+    assert len(records) == 2
+    assert {record.duplicate_group_id for record in records} == {"dup-0001"}
+    assert [record.is_unique_representative for record in records].count(True) == 1
+
+```
+
+
+================================================================================
+=== FILE: tests\fixtures\malformed.cif ===
+================================================================================
+
+```
+this is not a valid cif
+loop_
+ _atom_site_label
+
+```
+
+
+================================================================================
+=== FILE: tests\fixtures\multiplicity_bad.cif ===
+================================================================================
+
+```
+data_multiplicity_bad
+_symmetry_space_group_name_H-M   'P 1'
+_cell_length_a   5.0
+_cell_length_b   5.0
+_cell_length_c   5.0
+_cell_angle_alpha   90
+_cell_angle_beta    90
+_cell_angle_gamma   90
+_symmetry_Int_Tables_number 1
+loop_
+ _symmetry_equiv_pos_as_xyz
+ 'x, y, z'
+loop_
+ _atom_site_label
+ _atom_site_type_symbol
+ _atom_site_symmetry_multiplicity
+ _atom_site_fract_x
+ _atom_site_fract_y
+ _atom_site_fract_z
+ _atom_site_occupancy
+ Na1 Na 3 0 0 0 1
+ Cl1 Cl 3 0.5 0.5 0.5 1
+
+```
+
+
+================================================================================
+=== FILE: tests\fixtures\short_contact.cif ===
+================================================================================
+
+```
+data_short_contact
+_symmetry_space_group_name_H-M   'P 1'
+_cell_length_a   5.0
+_cell_length_b   5.0
+_cell_length_c   5.0
+_cell_angle_alpha   90
+_cell_angle_beta    90
+_cell_angle_gamma   90
+_symmetry_Int_Tables_number 1
+loop_
+ _symmetry_equiv_pos_as_xyz
+ 'x, y, z'
+loop_
+ _atom_site_label
+ _atom_site_type_symbol
+ _atom_site_fract_x
+ _atom_site_fract_y
+ _atom_site_fract_z
+ _atom_site_occupancy
+ C1 C 0 0 0 1
+ C2 C 0.02 0 0 1
+
+```
+
+
+================================================================================
+=== FILE: tests\fixtures\tiny_valid.cif ===
+================================================================================
+
+```
+data_NaCl
+_symmetry_space_group_name_H-M   'P 1'
+_cell_length_a   5.6402
+_cell_length_b   5.6402
+_cell_length_c   5.6402
+_cell_angle_alpha   90
+_cell_angle_beta    90
+_cell_angle_gamma   90
+_symmetry_Int_Tables_number 1
+loop_
+ _symmetry_equiv_pos_as_xyz
+ 'x, y, z'
+loop_
+ _atom_site_label
+ _atom_site_type_symbol
+ _atom_site_fract_x
+ _atom_site_fract_y
+ _atom_site_fract_z
+ _atom_site_occupancy
+ Na1 Na 0 0 0 1
+ Cl1 Cl 0.5 0.5 0.5 1
+
+```
+
+
+================================================================================
+=== FILE: tests\fixtures\tiny_valid_copy.cif ===
+================================================================================
+
+```
+data_NaCl_copy
+_symmetry_space_group_name_H-M   'P 1'
+_cell_length_a   5.6402
+_cell_length_b   5.6402
+_cell_length_c   5.6402
+_cell_angle_alpha   90
+_cell_angle_beta    90
+_cell_angle_gamma   90
+_symmetry_Int_Tables_number 1
+loop_
+ _symmetry_equiv_pos_as_xyz
+ 'x, y, z'
+loop_
+ _atom_site_label
+ _atom_site_type_symbol
+ _atom_site_fract_x
+ _atom_site_fract_y
+ _atom_site_fract_z
+ _atom_site_occupancy
+ Na1 Na 0 0 0 1
+ Cl1 Cl 0.5 0.5 0.5 1
+
+```
+
+
+################################################################################
+# MANIFEST
+# Included files:
+#  - project_context.txt
+#  - project_to_txt.py
+#  - pyproject.toml
+#  - README.md
+#  - requirements-dev.txt
+#  - requirements.txt
+#  - examples\cif_manifest.csv
+#  - examples\run_alignn_folder.sh
+#  - examples\run_crystallm_eval.sh
+#  - examples\cifs\tiny_valid.cif
+#  - sca\batch.py
+#  - sca\cli.py
+#  - sca\io.py
+#  - sca\schemas.py
+#  - sca\scoring.py
+#  - sca\__init__.py
+#  - sca\evaluators\alignn.py
+#  - sca\evaluators\base.py
+#  - sca\evaluators\bonds.py
+#  - sca\evaluators\cif_parse.py
+#  - sca\evaluators\composition.py
+#  - sca\evaluators\geometry.py
+#  - sca\evaluators\multiplicity.py
+#  - sca\evaluators\novelty.py
+#  - sca\evaluators\symmetry.py
+#  - sca\evaluators\uniqueness.py
+#  - sca\evaluators\__init__.py
+#  - sca\pipelines\crystallm_style.py
+#  - sca\pipelines\__init__.py
+#  - tests\test_alignn_mock.py
+#  - tests\test_bonds.py
+#  - tests\test_cif_parse.py
+#  - tests\test_cli.py
+#  - tests\test_composition.py
+#  - tests\test_crystallm_style_pipeline.py
+#  - tests\test_geometry.py
+#  - tests\test_io.py
+#  - tests\test_multiplicity.py
+#  - tests\test_novelty.py
+#  - tests\test_schemas.py
+#  - tests\test_symmetry.py
+#  - tests\test_uniqueness.py
+#  - tests\fixtures\malformed.cif
+#  - tests\fixtures\multiplicity_bad.cif
+#  - tests\fixtures\short_contact.cif
+#  - tests\fixtures\tiny_valid.cif
+#  - tests\fixtures\tiny_valid_copy.cif
+#
+# Skips summary:
+#  dir: 1
+#  hidden: 2
+#  size: 0
+#  binary: 0
+#  ext: 0
+#  other: 0
+#  gitignore: 7
+# END
