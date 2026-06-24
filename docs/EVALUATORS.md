@@ -18,9 +18,10 @@ energy-above-hull analysis, or experimental validation.
 - `alignn`: optional ALIGNN formation-energy prediction.
 - `chgnet_static`: optional CHGNet static surrogate energy and force magnitude.
 - `m3gnet_static`: optional MatGL/M3GNet static surrogate energy.
-- `mace_static`: optional MACE ASE calculator route. Requires `SCA_MACE_MODEL`.
+- `mace_static`: optional MACE ASE calculator route. Supports local
+  `SCA_MACE_MODEL` or explicit pretrained `SCA_MACE_PRETRAINED`.
 - `sevennet_static`: optional SevenNet ASE calculator route. Requires
-  `SCA_SEVENNET_MODEL`.
+  local `SCA_SEVENNET_MODEL` or explicit pretrained `SCA_SEVENNET_PRETRAINED`.
 - `mlip_ensemble`: computes agreement metrics from available surrogate/MLIP
   energy columns.
 - `property_targets`: compares predicted/surrogate property values against
@@ -30,6 +31,15 @@ energy-above-hull analysis, or experimental validation.
 
 Missing optional dependencies or missing model configuration are returned as
 structured benchmark results. They should not crash a benchmark run.
+
+Run `python -m sca.cli verify-backends` to check which optional backends are
+installed and whether local MACE/SevenNet model paths are configured. See
+`docs/INSTALL_BACKENDS.md` for install commands.
+
+Paper-comparable A-E summaries are computed after benchmarking with
+`python -m sca.cli paper-benchmark-summary`. They reuse evaluator output columns
+and mark missing structure-match, predicted-hull, relaxation, or novelty inputs
+as not computable. See `docs/PAPER_BENCHMARKS.md`.
 
 ## SPP Fields
 

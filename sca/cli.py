@@ -9,12 +9,15 @@ import typer
 from click import ClickException
 from rich.console import Console
 
+from sca.backends import verify_optional_backends
 from sca.benchmark import benchmark_folder, benchmark_manifest, benchmark_one
 from sca.batch import evaluate_folder, evaluate_manifest, evaluate_many, evaluate_one
 from sca.evaluators.alignn import AlignnEvaluator, DEFAULT_ALIGNN_MODEL
 from sca.evaluators.novelty import load_reference_structures_with_stats
 from sca.evaluators.registry import get_evaluator_spec, list_evaluator_specs
 from sca.io import discover_cif_files, load_manifest, write_csv, write_jsonl, write_single_json, write_summary_csv
+from sca.paper_benchmarks.manifest_builder import build_paper_run_manifest
+from sca.paper_benchmarks.summary import build_paper_benchmark_summary, write_summary_outputs
 from sca.pipelines.crystallm_style import evaluate_one_cif
 from sca.schemas import AggregateSummary
 
@@ -67,6 +70,13 @@ def list_evaluators() -> None:
             }
         )
     console.print_json(data=rows)
+
+
+@app.command("verify-backends")
+def verify_backends(functional: bool = typer.Option(False, "--functional", help="Run tiny functional smoke checks where available.")) -> None:
+    """Check optional benchmark backend imports and local model configuration."""
+
+    console.print_json(data=verify_optional_backends(functional=functional))
 
 
 @crystallm_app.command("one")
@@ -247,6 +257,59 @@ def benchmark_summary(
     out.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).to_csv(out, index=False)
     console.print(f"[green]Wrote {len(rows)} benchmark summary rows[/green] to {out}")
+
+
+@app.command("paper-benchmark-summary")
+def paper_benchmark_summary(
+    results_csv: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True),
+    manifest: Path = typer.Option(..., "--manifest", exists=True, file_okay=True, dir_okay=False, readable=True),
+    out: Path = typer.Option(..., "--out", help="Output paper benchmark summary CSV."),
+    json_out: Path = typer.Option(..., "--json", help="Output paper benchmark summary JSON."),
+    markdown: Path | None = typer.Option(None, "--markdown", help="Optional Markdown report output."),
+    group_col: str = typer.Option("benchmark_group", "--group-col"),
+    id_col: str = typer.Option("benchmark_id", "--id-col"),
+    attempt_col: str = typer.Option("attempt_id", "--attempt-col"),
+    target_col: str = typer.Option("benchmark_id", "--target-col"),
+    reference_required_policy: str = typer.Option("warn", "--reference-required-policy"),
+    include_built_in_comparators: bool = typer.Option(False, "--include-built-in-comparators"),
+    comparator_values: Path | None = typer.Option(None, "--comparator-values", exists=True, file_okay=True, dir_okay=False, readable=True),
+) -> None:
+    """Summarize SCA outputs against paper-comparable A-E benchmark metrics."""
+
+    summary = build_paper_benchmark_summary(
+        results_csv=results_csv,
+        manifest_csv=manifest,
+        comparator_values=comparator_values,
+        include_built_in_comparators=include_built_in_comparators,
+        group_col=group_col,
+        id_col=target_col or id_col,
+        attempt_col=attempt_col,
+        reference_required_policy=reference_required_policy,
+    )
+    write_summary_outputs(summary, out_csv=out, out_json=json_out, markdown=markdown)
+    console.print(f"[green]Wrote {len(summary.rows)} paper benchmark summary rows[/green] to {out} and {json_out}")
+
+
+@app.command("build-paper-run-manifest")
+def build_paper_run_manifest_cli(
+    targets: Path = typer.Option(..., "--targets", exists=True, file_okay=True, dir_okay=False, readable=True),
+    generated_folder: Path = typer.Option(..., "--generated-folder", exists=True, file_okay=False, dir_okay=True, readable=True),
+    out: Path = typer.Option(..., "--out", help="Output generated benchmark manifest CSV."),
+    recursive: bool = typer.Option(True, "--recursive/--no-recursive"),
+) -> None:
+    """Map generated CIF files onto paper benchmark target rows."""
+
+    frame = build_paper_run_manifest(
+        targets_csv=targets,
+        generated_folder=generated_folder,
+        out_csv=out,
+        recursive=recursive,
+    )
+    mapped = int((frame["mapping_status"] == "matched").sum()) if "mapping_status" in frame else 0
+    console.print(
+        f"[green]Wrote {len(frame)} manifest rows[/green] to {out} "
+        f"({mapped} matched, {len(frame) - mapped} unmapped)"
+    )
 
 
 def _benchmark_summary_group(group_value: str, frame: pd.DataFrame) -> dict:

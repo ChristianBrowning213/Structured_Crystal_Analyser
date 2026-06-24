@@ -53,6 +53,21 @@ Optional evaluators are lazy. If an optional dependency such as ALIGNN or CHGNet
 is not installed, benchmark runs return structured evaluator results rather than
 crashing the whole benchmark.
 
+See `docs/INSTALL_BACKENDS.md` for optional extras, model setup, and
+`python -m sca.cli verify-backends`.
+
+For paper-comparable A-E summaries over an existing benchmark CSV, see
+`docs/PAPER_BENCHMARKS.md` and:
+
+```bash
+python -m sca.cli paper-benchmark-summary reports/paper_targets_results.csv \
+  --manifest benchmarks/paper_targets/paper_targets_v1.csv \
+  --include-built-in-comparators \
+  --out reports/paper_benchmark_summary.csv \
+  --json reports/paper_benchmark_summary.json \
+  --markdown reports/paper_benchmark_report.md
+```
+
 ## Example Commands
 
 ```bash

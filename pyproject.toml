@@ -24,6 +24,32 @@ dependencies = [
 alignn = [
   "alignn>=2024.0"
 ]
+chgnet = [
+  "chgnet>=0.3.0"
+]
+matgl = [
+  "matgl>=1.1.0"
+]
+mlip = [
+  "chgnet>=0.3.0",
+  "matgl>=1.1.0"
+]
+advanced-mlip = [
+  "mace-torch>=0.3.0",
+  "sevenn>=0.10.0"
+]
+benchmark-full = [
+  "alignn>=2024.0",
+  "chgnet>=0.3.0",
+  "matgl>=1.1.0"
+]
+benchmark-advanced = [
+  "alignn>=2024.0",
+  "chgnet>=0.3.0",
+  "matgl>=1.1.0",
+  "mace-torch>=0.3.0",
+  "sevenn>=0.10.0"
+]
 dev = [
   "pytest>=8.0",
   "ruff>=0.5"

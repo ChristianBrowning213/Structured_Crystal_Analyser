@@ -151,6 +151,7 @@ def benchmark_manifest(
                 "target_property_value": _optional_float_cell(row, target_property_value_col, frame.columns),
                 "method": _optional_cell(row, method_col, frame.columns),
                 "query_id": _optional_cell(row, query_id_col, frame.columns),
+                "extra_context": _manifest_extra_context(row, frame.columns, path_col),
             }
         )
     return benchmark_items(
@@ -362,7 +363,21 @@ def _optional_path_cell(row, column: str | None, columns, manifest_csv: str | Pa
 
 def _add_item_context(flattened: dict, item: dict) -> None:
     flattened.setdefault("input_path", str(item["path"]))
+    for key, value in (item.get("extra_context") or {}).items():
+        if value is not None and str(value).strip() != "":
+            flattened.setdefault(key, value)
     for key in (
+        "benchmark_id",
+        "benchmark_group",
+        "attempt_id",
+        "target_structure_family",
+        "target_crystal_system",
+        "paper_source",
+        "paper_name",
+        "prompt",
+        "reference_cif_path",
+        "reference_id",
+        "reference_source",
         "target_formation_energy_per_atom",
         "target_energy_above_hull",
         "target_band_gap",
@@ -373,6 +388,19 @@ def _add_item_context(flattened: dict, item: dict) -> None:
         value = item.get(key)
         if value is not None:
             flattened[key] = value
+
+
+def _manifest_extra_context(row, columns, path_col: str) -> dict:
+    excluded = {path_col}
+    context = {}
+    for column in columns:
+        if column in excluded:
+            continue
+        value = row[column]
+        if value is None or str(value).lower() == "nan" or str(value).strip() == "":
+            continue
+        context[str(column)] = value
+    return context
 
 
 def _evaluate_other_evaluator(name: str, evaluator, item: dict) -> BenchmarkEvaluatorResult:
