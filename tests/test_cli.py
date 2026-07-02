@@ -4,10 +4,35 @@ import pandas as pd
 from typer.testing import CliRunner
 
 from sca.cli import app
+from sca.io import load_manifest_frame
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
 runner = CliRunner()
+
+
+DUMMY_SPECIES_CIF = """data_dummy
+_symmetry_space_group_name_H-M   'P 1'
+_cell_length_a   5
+_cell_length_b   5
+_cell_length_c   5
+_cell_angle_alpha   90
+_cell_angle_beta    90
+_cell_angle_gamma   90
+_symmetry_Int_Tables_number 1
+loop_
+ _symmetry_equiv_pos_as_xyz
+ 'x, y, z'
+loop_
+ _atom_site_label
+ _atom_site_type_symbol
+ _atom_site_fract_x
+ _atom_site_fract_y
+ _atom_site_fract_z
+ _atom_site_occupancy
+ A1 A0+ 0 0 0 1
+ O1 O 0.5 0.5 0.5 1
+"""
 
 
 def test_cli_help_commands_work() -> None:
@@ -94,6 +119,29 @@ def test_manifest_mode_writes_csv_and_jsonl(tmp_path: Path) -> None:
     frame = pd.read_csv(csv_out)
     assert frame["method"].tolist() == ["m"]
     assert jsonl_out.read_text(encoding="utf-8").count("\n") == 1
+
+
+def test_manifest_loader_preserves_existing_repo_relative_paths(tmp_path: Path, monkeypatch) -> None:
+    run_root = tmp_path / "local_runs" / "example_run"
+    cif_dir = run_root / "generated_cifs"
+    manifest_dir = run_root / "manifests"
+    cif_dir.mkdir(parents=True)
+    manifest_dir.mkdir(parents=True)
+    (cif_dir / "candidate.cif").write_text(
+        (FIXTURES / "tiny_valid.cif").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    manifest = manifest_dir / "generated_cifs_manifest_for_sca.csv"
+    manifest.write_text(
+        "cif_path,target_formula\nlocal_runs/example_run/generated_cifs/candidate.cif,NaCl\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    frame = load_manifest_frame(manifest, "cif_path")
+
+    assert Path(frame["cif_path"].iloc[0]) == (cif_dir / "candidate.cif").resolve()
+    assert "manifests" not in Path(frame["cif_path"].iloc[0]).parts[-4:]
 
 
 def test_benchmark_folder_writes_csv_and_jsonl(tmp_path: Path) -> None:
@@ -232,6 +280,60 @@ def test_benchmark_manifest_preserves_metadata(tmp_path: Path) -> None:
     assert frame["target_formula_match"].tolist() == [True]
 
 
+def test_direct_cif_set_records_dummy_species_and_continues(tmp_path: Path) -> None:
+    cif_dir = tmp_path / "cifs"
+    cif_dir.mkdir()
+    (cif_dir / "tiny_valid.cif").write_text(
+        (FIXTURES / "tiny_valid.cif").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (cif_dir / "dummy_species.cif").write_text(DUMMY_SPECIES_CIF, encoding="utf-8")
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text(
+        "cif_path,target_formula,benchmark_id,attempt_id,method\n"
+        "cifs/tiny_valid.cif,NaCl,valid,1,test\n"
+        "cifs/dummy_species.cif,AO,dummy,2,test\n",
+        encoding="utf-8",
+    )
+    results_csv = tmp_path / "benchmark_results.csv"
+    summary_csv = tmp_path / "benchmark_summary.csv"
+    summary_json = tmp_path / "benchmark_summary.json"
+    markdown = tmp_path / "benchmark_report.md"
+
+    result = runner.invoke(
+        app,
+        [
+            "benchmark-cif-set",
+            "--manifest",
+            str(manifest),
+            "--out",
+            str(results_csv),
+            "--summary",
+            str(summary_csv),
+            "--json",
+            str(summary_json),
+            "--markdown",
+            str(markdown),
+        ],
+    )
+
+    assert result.exit_code == 0
+    frame = pd.read_csv(results_csv)
+    assert len(frame) == 2
+    dummy = frame.loc[frame["benchmark_id"] == "dummy"].iloc[0]
+    assert dummy["parse_ok"] == False  # noqa: E712
+    assert dummy["chemical_species_valid"] == False  # noqa: E712
+    assert "A0+" in dummy["invalid_species"]
+    assert dummy["error_type"] == "InvalidSpeciesError"
+
+    summary = pd.read_csv(summary_csv)
+    metrics = dict(zip(summary["metric_name"], summary["our_value"]))
+    assert metrics["total_cif_count"] == 2.0
+    assert metrics["parse_clean_count"] == 1.0
+    assert metrics["parse_failure_count"] == 1.0
+    assert metrics["invalid_species_count"] == 1.0
+
+
 def test_benchmark_manifest_structure_match_target_cif(tmp_path: Path) -> None:
     cif_dir = tmp_path / "cifs"
     cif_dir.mkdir()
@@ -366,6 +468,41 @@ def test_chgnet_static_missing_dependency_is_structured(tmp_path: Path, monkeypa
     assert frame["chgnet_error"].tolist() == ["missing chgnet for test"]
     assert frame["evaluator_chgnet_static_skipped"].tolist() == [True]
     assert "missing chgnet for test" in jsonl_out.read_text(encoding="utf-8")
+
+
+def test_chgnet_relax_missing_dependency_is_structured(tmp_path: Path, monkeypatch) -> None:
+    import sca.evaluators.chgnet_relax as chgnet_relax
+
+    def missing_model():
+        raise RuntimeError("missing chgnet relax for test")
+
+    monkeypatch.setattr(chgnet_relax, "_load_chgnet_model", missing_model)
+    csv_out = tmp_path / "relax.csv"
+    jsonl_out = tmp_path / "relax.jsonl"
+
+    result = runner.invoke(
+        app,
+        [
+            "benchmark",
+            "one",
+            str(FIXTURES / "tiny_valid.cif"),
+            "--evaluators",
+            "chgnet_relax",
+            "--target-cif-path",
+            str(FIXTURES / "tiny_valid_copy.cif"),
+            "--out",
+            str(csv_out),
+            "--jsonl",
+            str(jsonl_out),
+        ],
+    )
+
+    assert result.exit_code == 0
+    frame = pd.read_csv(csv_out)
+    assert frame["relax_ok"].tolist() == [False]
+    assert frame["relax_error"].tolist() == ["missing chgnet relax for test"]
+    assert frame["evaluator_chgnet_relax_skipped"].tolist() == [True]
+    assert "missing chgnet relax for test" in jsonl_out.read_text(encoding="utf-8")
 
 
 def test_benchmark_summary_outputs_expected_columns(tmp_path: Path) -> None:

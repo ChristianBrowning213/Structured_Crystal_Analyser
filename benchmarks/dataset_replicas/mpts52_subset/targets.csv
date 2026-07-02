@@ -1,0 +1,2 @@
+benchmark_id,cif_path,attempt_id,target_formula,reference_cif_path,reference_id,method,dataset_scope,notes
+mpts52_example_001,,1,YbMn6Sn6,reference_cifs/mpts52_example_001.cif,mpts52_example_001,example,MPTS-52,Example row only; no dataset downloaded.

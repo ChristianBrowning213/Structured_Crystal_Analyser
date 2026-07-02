@@ -59,10 +59,26 @@ def load_manifest_frame(csv_path: str | Path, path_col: str) -> pd.DataFrame:
         raise ValueError(f"Manifest column '{path_col}' not found. Available columns: {available}")
     frame = frame.copy()
     frame[path_col] = [
-        str(path if path.is_absolute() else (manifest_path.parent / path).resolve())
+        str(resolve_manifest_path(path, manifest_path))
         for path in (Path(str(value)) for value in frame[path_col])
     ]
     return frame
+
+
+def resolve_manifest_path(path: str | Path, manifest_path: str | Path) -> Path:
+    """Resolve manifest paths while preserving repo-root-relative entries.
+
+    Manifest-relative paths remain supported, but paths that already exist from
+    the current working directory are treated as intentionally repo-root/current
+    working directory relative.
+    """
+
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return candidate
+    if candidate.exists():
+        return candidate.resolve()
+    return (Path(manifest_path).parent / candidate).resolve()
 
 
 def write_single_json(result: CrystalEvalRecord | CrystalEvaluationResult, output_path: str | Path) -> None:

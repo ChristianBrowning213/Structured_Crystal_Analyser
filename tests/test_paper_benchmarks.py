@@ -1,10 +1,12 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 from typer.testing import CliRunner
 
 from sca.benchmark import benchmark_manifest
 from sca.cli import app
+from sca.paper_benchmarks.diagnostics import build_paper_target_diagnostics
 from sca.paper_benchmarks.manifest_builder import build_paper_run_manifest
 from sca.paper_benchmarks.comparators import built_in_comparators
 from sca.paper_benchmarks.summary import build_paper_benchmark_summary
@@ -141,6 +143,137 @@ def test_paper_benchmark_summary_cli_writes_csv_json_and_markdown(tmp_path: Path
     assert "SCA Paper-Comparable Benchmark Report" in out_md.read_text(encoding="utf-8")
 
 
+def test_paper_target_diagnostics_classifies_wrong_prototype_and_relaxation(tmp_path: Path) -> None:
+    generated = tmp_path / "generated.cif"
+    reference = tmp_path / "reference.cif"
+    relaxed = tmp_path / "relaxed.cif"
+    generated.write_text(Path("tests/fixtures/tiny_valid.cif").read_text(encoding="utf-8"), encoding="utf-8")
+    reference.write_text(Path("tests/fixtures/tiny_valid_copy.cif").read_text(encoding="utf-8"), encoding="utf-8")
+    relaxed.write_text(Path("tests/fixtures/tiny_valid_copy.cif").read_text(encoding="utf-8"), encoding="utf-8")
+    results = tmp_path / "results.csv"
+    manifest = tmp_path / "manifest.csv"
+    references = tmp_path / "references.csv"
+    pd.DataFrame(
+        [
+            {
+                "benchmark_id": "target-1",
+                "file_name": "generated.cif",
+                "cif_path": str(generated),
+                "reference_cif_path": str(reference),
+                "reference_id": "ref-1",
+                "relaxed_cif_path": str(relaxed),
+                "target_formula": "NaCl",
+                "generated_reduced_formula": "NaCl",
+                "target_structure_family": "rocksalt",
+                "structure_match": False,
+                "structure_match_after": True,
+                "relax_ok": True,
+                "energy_drop_per_atom": 0.2,
+                "max_force_before": 1.0,
+                "max_force_after": 0.1,
+                "geometry_ok": True,
+                "bond_lengths_reasonable": True,
+                "num_bad_contacts": 0,
+                "mlip_consensus_stable_flag": True,
+            }
+        ]
+    ).to_csv(results, index=False)
+    pd.DataFrame(
+        [
+            {
+                "benchmark_id": "target-1",
+                "target_structure_family": "rocksalt",
+                "reference_cif_path": str(reference),
+                "notes": "Ideal prototype reference.",
+            }
+        ]
+    ).to_csv(manifest, index=False)
+    pd.DataFrame(
+        [
+            {
+                "benchmark_id": "target-1",
+                "reference_id": "ref-1",
+                "reference_cif_path": str(reference),
+                "reference_formula": "NaCl",
+                "reference_family": "rocksalt",
+                "reference_prototype": "B1 rocksalt",
+                "notes": "Ideal prototype.",
+            }
+        ]
+    ).to_csv(references, index=False)
+
+    rows = build_paper_target_diagnostics(results, manifest, references)
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["primary_category"] == "near_match"
+    assert "relaxation_improved" in row["category_flags"]
+    assert row["reference_risk"] == "prototype_or_polymorph_note"
+    assert row["generated_space_group"]
+
+
+def test_paper_target_diagnostics_cli_writes_outputs(tmp_path: Path) -> None:
+    generated = tmp_path / "generated.cif"
+    reference = tmp_path / "reference.cif"
+    generated.write_text(Path("tests/fixtures/tiny_valid.cif").read_text(encoding="utf-8"), encoding="utf-8")
+    reference.write_text(Path("tests/fixtures/tiny_valid_copy.cif").read_text(encoding="utf-8"), encoding="utf-8")
+    results = tmp_path / "results.csv"
+    manifest = tmp_path / "manifest.csv"
+    references = tmp_path / "references.csv"
+    out_csv = tmp_path / "diagnostics.csv"
+    out_json = tmp_path / "diagnostics.json"
+    out_md = tmp_path / "diagnostics.md"
+    pd.DataFrame(
+        [
+            {
+                "benchmark_id": "target-1",
+                "file_name": "generated.cif",
+                "cif_path": str(generated),
+                "reference_cif_path": str(reference),
+                "structure_match": True,
+                "relax_ok": False,
+                "geometry_ok": True,
+                "bond_lengths_reasonable": True,
+                "num_bad_contacts": 0,
+            }
+        ]
+    ).to_csv(results, index=False)
+    pd.DataFrame([{"benchmark_id": "target-1", "reference_cif_path": str(reference)}]).to_csv(manifest, index=False)
+    pd.DataFrame(
+        [
+            {
+                "benchmark_id": "target-1",
+                "reference_cif_path": str(reference),
+                "reference_formula": "NaCl",
+            }
+        ]
+    ).to_csv(references, index=False)
+
+    result = runner.invoke(
+        app,
+        [
+            "paper-target-diagnostics",
+            "--results",
+            str(results),
+            "--manifest",
+            str(manifest),
+            "--references",
+            str(references),
+            "--out",
+            str(out_csv),
+            "--json",
+            str(out_json),
+            "--markdown",
+            str(out_md),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert pd.read_csv(out_csv)["primary_category"].tolist() == ["exact_reference_match"]
+    assert out_json.exists()
+    assert "Paper Target Diagnostics" in out_md.read_text(encoding="utf-8")
+
+
 def test_build_paper_run_manifest_maps_generated_cifs(tmp_path: Path) -> None:
     targets = tmp_path / "targets.csv"
     targets.write_text(
@@ -163,6 +296,81 @@ def test_build_paper_run_manifest_maps_generated_cifs(tmp_path: Path) -> None:
     assert frame.loc[0, "attempt_id"] == 1
     assert frame.loc[0, "target_formula"] == "NaCl"
     assert frame.loc[0, "mapping_status"] == "matched"
+    assert "mapping_confidence" in frame.columns
+    assert "method" in frame.columns
+
+
+def test_build_paper_run_manifest_maps_by_reduced_formula(tmp_path: Path) -> None:
+    targets = tmp_path / "targets.csv"
+    targets.write_text(
+        "benchmark_id,benchmark_group,target_formula,target_structure_family\n"
+        "sanity_nacl,A_validity,Na1Cl1,rocksalt\n",
+        encoding="utf-8",
+    )
+    generated = tmp_path / "generated"
+    generated.mkdir()
+    (generated / "challenge_001_salt_solution.cif").write_text(
+        Path("tests/fixtures/tiny_valid.cif").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    frame = build_paper_run_manifest(targets, generated, tmp_path / "manifest.csv")
+
+    assert frame.loc[0, "benchmark_id"] == "sanity_nacl"
+    assert frame.loc[0, "mapping_confidence"] == "reduced_formula"
+
+
+def test_build_paper_run_manifest_disambiguates_by_family_token(tmp_path: Path) -> None:
+    targets = tmp_path / "targets.csv"
+    targets.write_text(
+        "benchmark_id,benchmark_group,target_formula,target_structure_family\n"
+        "tio2_rutile,B_structure_reproduction,TiO2,rutile\n"
+        "tio2_anatase,B_structure_reproduction,TiO2,anatase\n",
+        encoding="utf-8",
+    )
+    generated = tmp_path / "generated"
+    generated.mkdir()
+    (generated / "challenge_001_tio2_rutile_solution.cif").write_text("not a cif", encoding="utf-8")
+
+    frame = build_paper_run_manifest(targets, generated, tmp_path / "manifest.csv")
+
+    assert frame.loc[0, "benchmark_id"] == "tio2_rutile"
+    assert frame.loc[0, "mapping_confidence"] == "exact_formula_and_family"
+
+
+def test_build_paper_run_manifest_emits_unmatched_and_ambiguous_rows(tmp_path: Path) -> None:
+    targets = tmp_path / "targets.csv"
+    targets.write_text(
+        "benchmark_id,benchmark_group,target_formula,target_structure_family\n"
+        "tio2_rutile,B_structure_reproduction,TiO2,rutile\n"
+        "tio2_anatase,B_structure_reproduction,TiO2,anatase\n",
+        encoding="utf-8",
+    )
+    generated = tmp_path / "generated"
+    generated.mkdir()
+    (generated / "challenge_001_tio2_solution.cif").write_text("not a cif", encoding="utf-8")
+    (generated / "challenge_002_xyz_solution.cif").write_text("not a cif", encoding="utf-8")
+    unmatched = tmp_path / "unmatched.csv"
+
+    frame = build_paper_run_manifest(targets, generated, tmp_path / "manifest.csv", unmatched_out=unmatched)
+    unmatched_frame = pd.read_csv(unmatched)
+
+    assert set(frame["mapping_status"]) == {"ambiguous", "unmatched"}
+    assert set(unmatched_frame["mapping_status"]) == {"ambiguous", "unmatched"}
+
+
+def test_build_paper_run_manifest_strict_fails_on_unmatched(tmp_path: Path) -> None:
+    targets = tmp_path / "targets.csv"
+    targets.write_text(
+        "benchmark_id,benchmark_group,target_formula\nsanity_nacl,A_validity,NaCl\n",
+        encoding="utf-8",
+    )
+    generated = tmp_path / "generated"
+    generated.mkdir()
+    (generated / "challenge_001_xyz_solution.cif").write_text("not a cif", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="Unmatched or ambiguous"):
+        build_paper_run_manifest(targets, generated, tmp_path / "manifest.csv", strict=True)
 
 
 def test_benchmark_manifest_preserves_paper_metadata(tmp_path: Path) -> None:
@@ -187,3 +395,25 @@ def test_benchmark_manifest_preserves_paper_metadata(tmp_path: Path) -> None:
     assert str(row["attempt_id"]) == "1"
     assert row["target_structure_family"] == "rocksalt"
     assert row["target_formula_match"] is True
+
+
+def test_structure_match_uses_reference_cif_path_alias(tmp_path: Path) -> None:
+    reference = Path("tests/fixtures/tiny_valid.cif").resolve()
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text(
+        "cif_path,benchmark_id,benchmark_group,target_formula,reference_cif_path,reference_id\n"
+        f"{reference},sanity_nacl,B_structure_reproduction,NaCl,{reference},ref-nacl\n",
+        encoding="utf-8",
+    )
+
+    records = benchmark_manifest(
+        manifest,
+        evaluator_names=["pre_dft_validity", "structure_match"],
+        formula_col="target_formula",
+        reference_id_col="reference_id",
+    )
+
+    row = records[0].to_row()
+    assert row["reference_cif_path"] == str(reference)
+    assert row["structure_match"] is True
+    assert row["matched_reference_id"] == "ref-nacl"

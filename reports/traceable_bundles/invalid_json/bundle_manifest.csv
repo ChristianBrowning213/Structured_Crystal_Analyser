@@ -1,0 +1,2 @@
+run_id,prompt_id,bundle_dir,bundle_json,status,missing_source_artifacts,conversion_errors
+invalid_json,invalid_json,reports\traceable_bundles\invalid_json,reports\traceable_bundles\invalid_json\bundle.json,converted_with_missing_artifacts,structured_intent;retrieval_trace;constraint_trace;validation_trace;diagnostics_trace;final_decision,retrieval_trace.json: JSONDecodeError: Expecting value: line 2 column 1 (char 16)

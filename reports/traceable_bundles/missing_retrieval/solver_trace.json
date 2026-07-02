@@ -1,0 +1,12 @@
+{
+  "status": "loaded",
+  "errors": [],
+  "notes": null,
+  "backend": "fake",
+  "solver_status": "optimal",
+  "objective_value": null,
+  "num_variables": 4,
+  "num_constraints": 1,
+  "solve_time_seconds": null,
+  "infeasibility_explanation": null
+}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -11,15 +12,37 @@ from rich.console import Console
 
 from sca.backends import verify_optional_backends
 from sca.benchmark import benchmark_folder, benchmark_manifest, benchmark_one
+from sca.benchmark_protocols.direct import protocol_rows_with_computability, run_direct_cif_benchmark
+from sca.benchmark_protocols.e2e import run_e2e_text_benchmark
+from sca.benchmark_protocols.e2e_intent_runner import (
+    run_full_intent_benchmark_evaluation,
+    run_full_skill_loop_intent_benchmark,
+    run_skill_loop_intent_benchmark,
+)
+from sca.benchmark_protocols.intent_prompts import build_intent_prompt_manifest
 from sca.batch import evaluate_folder, evaluate_manifest, evaluate_many, evaluate_one
 from sca.evaluators.alignn import AlignnEvaluator, DEFAULT_ALIGNN_MODEL
 from sca.evaluators.novelty import load_reference_structures_with_stats
 from sca.evaluators.registry import get_evaluator_spec, list_evaluator_specs
 from sca.io import discover_cif_files, load_manifest, write_csv, write_jsonl, write_single_json, write_summary_csv
+from sca.paper_benchmarks.diagnostics import (
+    build_paper_target_diagnostics,
+    write_diagnostics_outputs,
+)
 from sca.paper_benchmarks.manifest_builder import build_paper_run_manifest
 from sca.paper_benchmarks.summary import build_paper_benchmark_summary, write_summary_outputs
 from sca.pipelines.crystallm_style import evaluate_one_cif
 from sca.schemas import AggregateSummary
+from sca.traceability.io import inspect_run_bundle
+from sca.traceability.adapters.llm_csp_archive import (
+    detect_llm_csp_archive,
+    load_llm_csp_archive,
+    write_traceable_bundle,
+)
+from sca.traceability.reports import write_bundle_inspection_outputs
+from sca.unique_benchmarks.repairability import run_repairability_benchmark
+from sca.unique_benchmarks.retrieval_ablation import run_retrieval_ablation_benchmark
+from sca.unique_benchmarks.summary import build_unique_csp_summary
 
 app = typer.Typer(help="Structured Crystal Analyser.")
 crystallm_app = typer.Typer(help="CrystaLLM-style pre-DFT crystal evaluation.")
@@ -77,6 +100,357 @@ def verify_backends(functional: bool = typer.Option(False, "--functional", help=
     """Check optional benchmark backend imports and local model configuration."""
 
     console.print_json(data=verify_optional_backends(functional=functional))
+
+
+@app.command("list-benchmark-protocols")
+def list_benchmark_protocols(
+    json_out: Path | None = typer.Option(None, "--json", help="Optional JSON output path."),
+    results: Path | None = typer.Option(None, "--results", exists=True, file_okay=True, dir_okay=False, readable=True, help="Optional results CSV used to mark computability."),
+) -> None:
+    """List built-in literature benchmark protocols."""
+
+    rows = protocol_rows_with_computability(results)
+    if json_out:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(json.dumps({"rows": rows}, indent=2), encoding="utf-8")
+    console.print_json(data=rows)
+
+
+@app.command("build-intent-benchmark-manifest")
+def build_intent_benchmark_manifest_cli(
+    out: Path = typer.Option(..., "--out", help="Output CSV prompt manifest."),
+    json_out: Path | None = typer.Option(None, "--json", help="Output JSON prompt manifest."),
+    seed: int = typer.Option(..., "--seed"),
+    num_prompts: int = typer.Option(100, "--num-prompts", min=1),
+) -> None:
+    """Build a seeded natural-language intent prompt manifest."""
+
+    try:
+        result = build_intent_prompt_manifest(out_csv=out, out_json=json_out, seed=seed, num_prompts=num_prompts)
+    except Exception as exc:
+        raise ClickException(str(exc)) from exc
+    console.print(f"[green]Wrote {result['rows']} intent prompts[/green] to {result['csv']}")
+
+
+@app.command("run-skill-loop-intent-benchmark")
+def run_skill_loop_intent_benchmark_cli(
+    prompts: Path = typer.Option(..., "--prompts", exists=True, file_okay=True, dir_okay=False, readable=True),
+    skill_loop_command: str = typer.Option(..., "--skill-loop-command"),
+    out_root: Path = typer.Option(..., "--out-root"),
+    seed: int = typer.Option(..., "--seed"),
+    num_attempts: int = typer.Option(1, "--num-attempts", min=1),
+) -> None:
+    """Run Skill-Loop-CSP for each intent prompt and collect CIF outputs."""
+
+    try:
+        result = run_skill_loop_intent_benchmark(
+            prompts=prompts,
+            skill_loop_command=skill_loop_command,
+            out_root=out_root,
+            seed=seed,
+            num_attempts=num_attempts,
+        )
+    except Exception as exc:
+        raise ClickException(str(exc)) from exc
+    console.print(
+        f"[green]Ran {result['prompts']} intent prompts[/green]; "
+        f"collected {result['generated_cifs']} CIFs into {result['manifest']}"
+    )
+
+
+@app.command("run-full-intent-benchmark-evaluation")
+def run_full_intent_benchmark_evaluation_cli(
+    run_root: Path = typer.Option(..., "--run-root", exists=True, file_okay=False, dir_okay=True, readable=True),
+    manifest: Path = typer.Option(..., "--manifest", exists=True, file_okay=True, dir_okay=False, readable=True),
+    seed: int = typer.Option(..., "--seed"),
+) -> None:
+    """Run direct, intent, unique-traceability, diagnostics, and final reports."""
+
+    try:
+        result = run_full_intent_benchmark_evaluation(run_root=run_root, manifest=manifest, seed=seed)
+    except Exception as exc:
+        raise ClickException(str(exc)) from exc
+    console.print(f"[green]Wrote full intent benchmark report[/green] to {result['report']}")
+
+
+@app.command("run-full-skill-loop-intent-benchmark")
+def run_full_skill_loop_intent_benchmark_cli(
+    skill_loop_command: str = typer.Option(..., "--skill-loop-command"),
+    out_root: Path = typer.Option(..., "--out-root"),
+    seed: int = typer.Option(..., "--seed"),
+    num_prompts: int = typer.Option(100, "--num-prompts", min=1),
+    num_attempts: int = typer.Option(1, "--num-attempts", min=1),
+    skip_generation: bool = typer.Option(False, "--skip-generation"),
+    skip_evaluation: bool = typer.Option(False, "--skip-evaluation"),
+) -> None:
+    """Build prompts, run Skill-Loop-CSP, evaluate, and write final reports."""
+
+    try:
+        result = run_full_skill_loop_intent_benchmark(
+            skill_loop_command=skill_loop_command,
+            out_root=out_root,
+            seed=seed,
+            num_prompts=num_prompts,
+            num_attempts=num_attempts,
+            skip_generation=skip_generation,
+            skip_evaluation=skip_evaluation,
+        )
+    except Exception as exc:
+        raise ClickException(str(exc)) from exc
+    console.print(f"[green]Full intent benchmark completed[/green]; prompts={result['prompts']}")
+
+
+@app.command("benchmark-cif-set")
+def benchmark_cif_set(
+    cif_folder: Path | None = typer.Option(None, "--cif-folder", exists=True, file_okay=False, dir_okay=True, readable=True),
+    manifest: Path | None = typer.Option(None, "--manifest", exists=True, file_okay=True, dir_okay=False, readable=True),
+    protocols: str = typer.Option("all", "--protocols"),
+    out: Path = typer.Option(..., "--out", help="Output direct CIF benchmark result CSV."),
+    summary: Path = typer.Option(..., "--summary", help="Output comparator summary CSV."),
+    json_out: Path = typer.Option(..., "--json", help="Output comparator summary JSON."),
+    markdown: Path = typer.Option(..., "--markdown", help="Output Markdown report."),
+    evaluators: str = typer.Option("auto", "--evaluators"),
+    include_relaxation: bool = typer.Option(False, "--include-relaxation"),
+    relax_backend: str = typer.Option("chgnet", "--relax-backend"),
+    hull_reference: Path | None = typer.Option(None, "--hull-reference", exists=True, file_okay=True, dir_okay=False),
+    reference_corpus: Path | None = typer.Option(None, "--reference-corpus", exists=True),
+    protocol_match_level: str = typer.Option("contextual_only", "--protocol-match-level"),
+    path_col: str = typer.Option("cif_path", "--path-col"),
+    attempt_col: str = typer.Option("attempt_id", "--attempt-col"),
+    target_col: str = typer.Option("benchmark_id", "--target-col"),
+    method_col: str = typer.Option("method", "--method-col"),
+) -> None:
+    """Run direct CIF-set benchmark and literature comparator report."""
+
+    try:
+        result = run_direct_cif_benchmark(
+            cif_folder=cif_folder,
+            manifest=manifest,
+            protocols=protocols,
+            out_csv=out,
+            summary_csv=summary,
+            json_out=json_out,
+            markdown=markdown,
+            evaluators=evaluators,
+            include_relaxation=include_relaxation,
+            relax_backend=relax_backend,
+            hull_reference=hull_reference,
+            reference_corpus=reference_corpus,
+            protocol_match_level=protocol_match_level,
+            path_col=path_col,
+            attempt_col=attempt_col,
+            target_col=target_col,
+            method_col=method_col,
+        )
+    except Exception as exc:
+        raise ClickException(str(exc)) from exc
+    console.print(
+        f"[green]Wrote {result['records']} direct CIF benchmark records[/green] "
+        f"to {result['results_csv']} and {result['summary_csv']}"
+    )
+
+
+@app.command("run-e2e-text-benchmark")
+def run_e2e_text_benchmark_cli(
+    prompts: Path = typer.Option(..., "--prompts", exists=True, file_okay=True, dir_okay=False, readable=True),
+    generator_command: str = typer.Option(..., "--generator-command"),
+    out_dir: Path = typer.Option(..., "--out-dir"),
+    num_attempts: int = typer.Option(20, "--num-attempts", min=1),
+    protocols: str = typer.Option("all", "--protocols"),
+    summary: Path = typer.Option(..., "--summary"),
+    markdown: Path = typer.Option(..., "--markdown"),
+    results: Path | None = typer.Option(None, "--results"),
+    json_out: Path | None = typer.Option(None, "--json"),
+    protocol_match_level: str = typer.Option("contextual_only", "--protocol-match-level"),
+) -> None:
+    """Run text prompts through a generator command and benchmark generated CIFs."""
+
+    try:
+        result = run_e2e_text_benchmark(
+            prompts=prompts,
+            generator_command=generator_command,
+            out_dir=out_dir,
+            num_attempts=num_attempts,
+            protocols=protocols,
+            summary=summary,
+            markdown=markdown,
+            results=results,
+            json_out=json_out,
+            protocol_match_level=protocol_match_level,
+        )
+    except Exception as exc:
+        raise ClickException(str(exc)) from exc
+    console.print(
+        f"[green]Ran {result['prompts']} prompts and collected {result['generated_cifs']} CIFs[/green]; "
+        f"summary written to {result['summary_csv']}"
+    )
+
+
+@app.command("inspect-run-bundle")
+def inspect_run_bundle_cli(
+    run_dir: Path = typer.Option(..., "--run-dir", exists=True, file_okay=False, dir_okay=True, readable=True),
+    out: Path = typer.Option(..., "--out", help="Output inspection CSV."),
+    json_out: Path = typer.Option(..., "--json", help="Output inspection JSON."),
+    markdown: Path = typer.Option(..., "--markdown", help="Output inspection Markdown report."),
+) -> None:
+    """Inspect a traceable text-to-crystal CSP run bundle."""
+
+    try:
+        inspection = inspect_run_bundle(run_dir)
+        write_bundle_inspection_outputs([inspection], out, json_out, markdown)
+    except Exception as exc:
+        raise ClickException(str(exc)) from exc
+    console.print(f"[green]Inspected run bundle[/green] {run_dir}; valid={inspection.bundle_valid}")
+
+
+@app.command("convert-run-archive-to-bundle")
+def convert_run_archive_to_bundle_cli(
+    archive: Path = typer.Option(..., "--archive", exists=True, file_okay=False, dir_okay=True, readable=True),
+    out_dir: Path = typer.Option(..., "--out-dir"),
+    run_id: str | None = typer.Option(None, "--run-id"),
+    markdown: Path | None = typer.Option(None, "--markdown", help="Optional inspection Markdown report."),
+) -> None:
+    """Convert one LLM-CSP/QLIP/evidence-pack archive into a traceable bundle."""
+
+    try:
+        if not detect_llm_csp_archive(archive):
+            raise ValueError(f"Archive does not look like an LLM-CSP/QLIP run archive: {archive}")
+        bundle = load_llm_csp_archive(archive, run_id=run_id)
+        result = write_traceable_bundle(bundle, out_dir)
+        inspection = inspect_run_bundle(out_dir)
+        if markdown:
+            write_bundle_inspection_outputs(
+                [inspection],
+                out_dir / "bundle_inspection.csv",
+                out_dir / "bundle_inspection.json",
+                markdown,
+            )
+    except Exception as exc:
+        raise ClickException(str(exc)) from exc
+    console.print(
+        f"[green]Converted archive[/green] {archive} -> {result['out_dir']}; "
+        f"valid={inspection.bundle_valid}"
+    )
+
+
+@app.command("convert-run-archives-to-bundles")
+def convert_run_archives_to_bundles_cli(
+    archives_root: Path = typer.Option(..., "--archives-root", exists=True, file_okay=False, dir_okay=True, readable=True),
+    out_dir: Path = typer.Option(..., "--out-dir"),
+    summary: Path = typer.Option(..., "--summary"),
+) -> None:
+    """Batch-convert child run archives into traceable bundles."""
+
+    rows = []
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        child_archives = [
+            path for path in sorted(archives_root.iterdir()) if path.is_dir() and detect_llm_csp_archive(path)
+        ]
+        candidates = child_archives or ([archives_root] if detect_llm_csp_archive(archives_root) else [])
+        for archive in candidates:
+            run_id = archive.name
+            target = out_dir / run_id
+            try:
+                bundle = load_llm_csp_archive(archive, run_id=run_id)
+                result = write_traceable_bundle(bundle, target)
+                inspection = inspect_run_bundle(target)
+                row = {
+                    **result["manifest_row"],
+                    "archive": str(archive),
+                    "bundle_valid": inspection.bundle_valid,
+                    "missing_artifacts": ";".join(inspection.missing_artifacts),
+                    "parse_errors": ";".join(inspection.parse_errors),
+                }
+            except Exception as exc:
+                row = {
+                    "run_id": run_id,
+                    "archive": str(archive),
+                    "bundle_dir": str(target),
+                    "bundle_valid": False,
+                    "conversion_errors": str(exc),
+                }
+            rows.append(row)
+        summary.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_csv(summary, index=False)
+    except Exception as exc:
+        raise ClickException(str(exc)) from exc
+    console.print(f"[green]Converted {len(rows)} archives[/green]; summary written to {summary}")
+
+
+@app.command("run-retrieval-ablation-benchmark")
+def run_retrieval_ablation_benchmark_cli(
+    prompts: Path = typer.Option(..., "--prompts", exists=True, file_okay=True, dir_okay=False, readable=True),
+    generator_command: str = typer.Option(..., "--generator-command"),
+    retrieval_modes: str = typer.Option("none,metadata,evidence_spp", "--retrieval-modes"),
+    out_dir: Path = typer.Option(..., "--out-dir"),
+    summary: Path = typer.Option(..., "--summary"),
+    json_out: Path = typer.Option(..., "--json"),
+    markdown: Path = typer.Option(..., "--markdown"),
+) -> None:
+    """Run a fake-or-real retrieval-mode ablation and summarize uplift metrics."""
+
+    try:
+        result = run_retrieval_ablation_benchmark(
+            prompts=prompts,
+            generator_command=generator_command,
+            retrieval_modes=retrieval_modes,
+            out_dir=out_dir,
+            summary=summary,
+            json_out=json_out,
+            markdown=markdown,
+        )
+    except Exception as exc:
+        raise ClickException(str(exc)) from exc
+    console.print(f"[green]Wrote retrieval ablation report[/green] with {result['rows']} rows")
+
+
+@app.command("run-repairability-benchmark")
+def run_repairability_benchmark_cli(
+    cases: Path = typer.Option(..., "--cases", exists=True, file_okay=True, dir_okay=False, readable=True),
+    repair_command: str = typer.Option(..., "--repair-command"),
+    out_dir: Path = typer.Option(..., "--out-dir"),
+    summary: Path = typer.Option(..., "--summary"),
+    json_out: Path = typer.Option(..., "--json"),
+    markdown: Path = typer.Option(..., "--markdown"),
+) -> None:
+    """Run repairability cases and write before/after repair metrics."""
+
+    try:
+        result = run_repairability_benchmark(
+            cases=cases,
+            repair_command=repair_command,
+            out_dir=out_dir,
+            summary=summary,
+            json_out=json_out,
+            markdown=markdown,
+        )
+    except Exception as exc:
+        raise ClickException(str(exc)) from exc
+    console.print(f"[green]Wrote repairability report[/green] with {result['rows']} rows")
+
+
+@app.command("unique-csp-benchmark-summary")
+def unique_csp_benchmark_summary_cli(
+    results: Path | None = typer.Option(None, "--results", file_okay=True, dir_okay=False, readable=True),
+    bundles: Path = typer.Option(..., "--bundles", exists=True, file_okay=False, dir_okay=True, readable=True),
+    out: Path = typer.Option(..., "--out", help="Output unique benchmark summary CSV."),
+    json_out: Path = typer.Option(..., "--json", help="Output unique benchmark summary JSON."),
+    markdown: Path = typer.Option(..., "--markdown", help="Output unique benchmark Markdown report."),
+) -> None:
+    """Build the unique traceable-constraint-grounded CSP composite report."""
+
+    try:
+        result = build_unique_csp_summary(
+            results=results,
+            bundles=bundles,
+            out_csv=out,
+            json_out=json_out,
+            markdown=markdown,
+        )
+    except Exception as exc:
+        raise ClickException(str(exc)) from exc
+    console.print(f"[green]Wrote unique CSP benchmark summary[/green] with {result['rows']} rows")
 
 
 @crystallm_app.command("one")
@@ -295,6 +669,12 @@ def build_paper_run_manifest_cli(
     targets: Path = typer.Option(..., "--targets", exists=True, file_okay=True, dir_okay=False, readable=True),
     generated_folder: Path = typer.Option(..., "--generated-folder", exists=True, file_okay=False, dir_okay=True, readable=True),
     out: Path = typer.Option(..., "--out", help="Output generated benchmark manifest CSV."),
+    filename_formula_mode: str = typer.Option("infer", "--filename-formula-mode"),
+    default_method: str = typer.Option("qlip_generated", "--default-method"),
+    attempt_id_mode: str = typer.Option("filename", "--attempt-id-mode"),
+    copy_reference_fields: bool = typer.Option(True, "--copy-reference-fields/--no-copy-reference-fields"),
+    unmatched_out: Path | None = typer.Option(None, "--unmatched-out", help="Optional CSV for unmatched or ambiguous CIFs."),
+    strict: bool = typer.Option(False, "--strict", help="Fail if any generated CIF is unmatched or ambiguous."),
     recursive: bool = typer.Option(True, "--recursive/--no-recursive"),
 ) -> None:
     """Map generated CIF files onto paper benchmark target rows."""
@@ -304,12 +684,39 @@ def build_paper_run_manifest_cli(
         generated_folder=generated_folder,
         out_csv=out,
         recursive=recursive,
+        filename_formula_mode=filename_formula_mode,
+        default_method=default_method,
+        attempt_id_mode=attempt_id_mode,
+        copy_reference_fields=copy_reference_fields,
+        unmatched_out=unmatched_out,
+        strict=strict,
     )
     mapped = int((frame["mapping_status"] == "matched").sum()) if "mapping_status" in frame else 0
+    ambiguous = int((frame["mapping_status"] == "ambiguous").sum()) if "mapping_status" in frame else 0
     console.print(
         f"[green]Wrote {len(frame)} manifest rows[/green] to {out} "
-        f"({mapped} matched, {len(frame) - mapped} unmapped)"
+        f"({mapped} matched, {ambiguous} ambiguous, {len(frame) - mapped - ambiguous} unmatched)"
     )
+
+
+@app.command("paper-target-diagnostics")
+def paper_target_diagnostics(
+    results: Path = typer.Option(..., "--results", exists=True, file_okay=True, dir_okay=False, readable=True),
+    manifest: Path = typer.Option(..., "--manifest", exists=True, file_okay=True, dir_okay=False, readable=True),
+    references: Path = typer.Option(..., "--references", exists=True, file_okay=True, dir_okay=False, readable=True),
+    out: Path = typer.Option(..., "--out", help="Output per-target diagnostics CSV."),
+    json_out: Path = typer.Option(..., "--json", help="Output per-target diagnostics JSON."),
+    markdown: Path | None = typer.Option(None, "--markdown", help="Optional Markdown diagnostics report."),
+) -> None:
+    """Classify per-target paper benchmark failures without changing metrics."""
+
+    rows = build_paper_target_diagnostics(
+        results_csv=results,
+        manifest_csv=manifest,
+        references_csv=references,
+    )
+    write_diagnostics_outputs(rows, out_csv=out, out_json=json_out, markdown=markdown)
+    console.print(f"[green]Wrote {len(rows)} target diagnostics rows[/green] to {out} and {json_out}")
 
 
 def _benchmark_summary_group(group_value: str, frame: pd.DataFrame) -> dict:

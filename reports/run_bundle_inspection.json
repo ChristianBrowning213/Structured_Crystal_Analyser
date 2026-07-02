@@ -1,0 +1,31 @@
+{
+  "rows": [
+    {
+      "run_id": "traceable_run_bundle",
+      "prompt_id": null,
+      "run_dir": "tests\\fixtures\\traceable_run_bundle",
+      "bundle_valid": true,
+      "missing_artifact_count": 0,
+      "missing_artifacts": "",
+      "parse_errors": "",
+      "crosslink_errors": "",
+      "reproducibility_metadata_present": true,
+      "missing_reproducibility_fields": "",
+      "artifact_prompt_present": true,
+      "artifact_structured_intent_present": true,
+      "artifact_retrieval_trace_present": true,
+      "artifact_constraint_trace_present": true,
+      "artifact_spp_trace_present": true,
+      "artifact_solver_trace_present": true,
+      "artifact_generated_candidates_present": true,
+      "artifact_validation_trace_present": true,
+      "artifact_relaxation_trace_present": true,
+      "artifact_diagnostics_trace_present": true,
+      "artifact_final_decision_present": true,
+      "artifact_environment_present": true,
+      "artifact_generator_config_present": true,
+      "artifact_retrieval_config_present": true,
+      "artifact_solver_config_present": true
+    }
+  ]
+}

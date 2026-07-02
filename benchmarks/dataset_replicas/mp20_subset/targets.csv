@@ -1,0 +1,2 @@
+benchmark_id,cif_path,attempt_id,target_formula,target_space_group,reference_cif_path,reference_id,method,dataset_scope,notes
+mp20_example_001,,1,NaCl,Fm-3m,reference_cifs/mp20_example_001.cif,mp20_example_001,example,MP-20,Example row only; no dataset downloaded.

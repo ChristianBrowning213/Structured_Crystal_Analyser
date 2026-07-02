@@ -12,11 +12,15 @@ class CifParseResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     parse_ok: bool
+    chemical_species_valid: bool | None = None
+    species: list[str] = Field(default_factory=list)
+    invalid_species: list[str] = Field(default_factory=list)
     formula: str | None = None
     reduced_formula: str | None = None
     n_sites: int | None = None
     volume: float | None = None
     density: float | None = None
+    density_error: str | None = None
     lattice_a: float | None = None
     lattice_b: float | None = None
     lattice_c: float | None = None
@@ -82,6 +86,7 @@ class GeometryResult(BaseModel):
     volume: float | None = None
     volume_per_atom: float | None = None
     density: float | None = None
+    density_error: str | None = None
     geometry_warning_count: int = 0
     geometry_warnings: list[str] = Field(default_factory=list)
     geometry_error: str | None = None
@@ -124,6 +129,9 @@ class CrystalEvalRecord(BaseModel):
     input_path: str
     file_name: str
     parse_ok: bool
+    chemical_species_valid: bool | None = None
+    species: list[str] = Field(default_factory=list)
+    invalid_species: list[str] = Field(default_factory=list)
     formula: str | None = None
     reduced_formula: str | None = None
     target_formula: str | None = None
@@ -142,6 +150,7 @@ class CrystalEvalRecord(BaseModel):
     volume: float | None = None
     volume_per_atom: float | None = None
     density: float | None = None
+    density_error: str | None = None
     geometry_ok: bool | None = None
     geometry_warning_count: int = 0
     duplicate_group_id: str | None = None

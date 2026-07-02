@@ -1,0 +1,44 @@
+{
+  "run_id": "cif_only",
+  "prompt_id": "cif_only",
+  "input_text": "",
+  "timestamp": null,
+  "run_dir": "tests\\fixtures\\run_archives\\cif_only",
+  "manifest_row": {},
+  "files": {},
+  "checksums": {},
+  "status": "converted_with_missing_artifacts",
+  "errors": [
+    "missing_source_artifact:prompt",
+    "missing_source_artifact:structured_intent",
+    "missing_source_artifact:retrieval_trace",
+    "missing_source_artifact:constraint_trace",
+    "missing_source_artifact:solver_trace",
+    "missing_source_artifact:validation_trace",
+    "missing_source_artifact:diagnostics_trace",
+    "missing_source_artifact:final_decision"
+  ],
+  "notes": "Converted by sca.traceability.adapters.llm_csp_archive.",
+  "structured_intent": null,
+  "retrieval_trace": null,
+  "constraint_trace": null,
+  "spp_trace": null,
+  "solver_trace": null,
+  "generated_candidates": {
+    "status": "loaded",
+    "errors": [],
+    "notes": null,
+    "candidates": [
+      {
+        "candidate_id": "candidate_001",
+        "cif_path": "tests\\fixtures\\run_archives\\cif_only\\generated.cif",
+        "source_path": "tests\\fixtures\\run_archives\\cif_only\\generated.cif",
+        "rank": 1
+      }
+    ]
+  },
+  "validation_trace": null,
+  "relaxation_trace": null,
+  "diagnostics_trace": null,
+  "final_decision": null
+}

@@ -1,0 +1,31 @@
+{
+  "rows": [
+    {
+      "run_id": "missing_retrieval",
+      "prompt_id": null,
+      "run_dir": "reports\\traceable_bundles\\missing_retrieval",
+      "bundle_valid": false,
+      "missing_artifact_count": 6,
+      "missing_artifacts": "structured_intent;retrieval_trace;constraint_trace;validation_trace;diagnostics_trace;final_decision",
+      "parse_errors": "",
+      "crosslink_errors": "",
+      "reproducibility_metadata_present": false,
+      "missing_reproducibility_fields": "environment;generator_config;retrieval_config;solver_config",
+      "artifact_prompt_present": true,
+      "artifact_structured_intent_present": false,
+      "artifact_retrieval_trace_present": false,
+      "artifact_constraint_trace_present": false,
+      "artifact_spp_trace_present": false,
+      "artifact_solver_trace_present": true,
+      "artifact_generated_candidates_present": true,
+      "artifact_validation_trace_present": false,
+      "artifact_relaxation_trace_present": false,
+      "artifact_diagnostics_trace_present": false,
+      "artifact_final_decision_present": false,
+      "artifact_environment_present": false,
+      "artifact_generator_config_present": false,
+      "artifact_retrieval_config_present": false,
+      "artifact_solver_config_present": false
+    }
+  ]
+}

@@ -10,6 +10,12 @@ outputs are surrogate model outputs, not final validation. DFT relaxation,
 energy-above-hull calculations, and experimental validation should be handled
 separately later.
 
+For natural-language crystal-design intent benchmarks, use the full
+Skill-Loop-CSP workflow in `docs/FULL_INTENT_BENCHMARK.md`. In that mode
+Skill-Loop-CSP generates CIFs or infeasibility archives, and SCA builds prompts,
+collects run archives, runs direct CIF validity, evaluates `intent_satisfaction`,
+converts traceable bundles, and writes one final report.
+
 ## Manifest Format
 
 Benchmark manifests are CSV files. The default path column is `cif_path`.
@@ -39,6 +45,9 @@ Common columns:
   anonymous, and combined modes.
 - `alignn`: optional ALIGNN formation-energy adapter.
 - `chgnet_static`: optional CHGNet static surrogate-energy adapter.
+- `chgnet_relax`: optional CHGNet structure relaxation adapter that writes real
+  `relax_ok`, before/after energy, before/after max force, relaxed CIF, and
+  reference-match columns for paper benchmark D metrics.
 - `spp`: Statistical Pair Potential plausibility scorer from a versioned
   `spp.v1.json` artifact.
 - `m3gnet_static`, `mace_static`, `sevennet_static`: optional MLIP-depth static
@@ -48,6 +57,10 @@ Common columns:
   target values.
 - `predicted_hull`: computes predicted/surrogate energy above hull from local
   reference phase entries.
+- `intent_satisfaction`: deterministic row evaluator for checking whether a
+  generated CIF matches the prompt's formula, family, symmetry, motif,
+  distance/contact, and expected solver-status constraints. Missing components
+  are marked `not_computable`, not zero.
 
 Optional evaluators are lazy. If an optional dependency such as ALIGNN or CHGNet
 is not installed, benchmark runs return structured evaluator results rather than
@@ -60,12 +73,64 @@ For paper-comparable A-E summaries over an existing benchmark CSV, see
 `docs/PAPER_BENCHMARKS.md` and:
 
 ```bash
+python -m sca.cli build-paper-run-manifest \
+  --targets benchmarks/paper_targets/paper_targets_v1.csv \
+  --generated-folder "C:\Users\brown\Downloads\example created cifs" \
+  --out benchmarks/paper_targets/generated_manifest.csv \
+  --unmatched-out benchmarks/paper_targets/unmatched_generated_cifs.csv
+
+python -m sca.cli benchmark manifest benchmarks/paper_targets/generated_manifest.csv \
+  --evaluators pre_dft_validity,structure_match,chgnet_static,chgnet_relax,m3gnet_static,mace_static,sevennet_static,mlip_ensemble \
+  --out reports/paper_targets_results.csv \
+  --jsonl reports/paper_targets_results.jsonl
+
 python -m sca.cli paper-benchmark-summary reports/paper_targets_results.csv \
   --manifest benchmarks/paper_targets/paper_targets_v1.csv \
   --include-built-in-comparators \
   --out reports/paper_benchmark_summary.csv \
   --json reports/paper_benchmark_summary.json \
   --markdown reports/paper_benchmark_report.md
+```
+
+For literature-replication comparator reports over arbitrary CIF folders or
+manifests, see `docs/LITERATURE_REPLICATION_BENCHMARKS.md`.
+
+```bash
+python -m sca.cli list-benchmark-protocols
+
+python -m sca.cli benchmark-cif-set \
+  --manifest benchmarks/paper_targets/generated_manifest.csv \
+  --protocols all \
+  --out reports/direct_manifest_results.csv \
+  --summary reports/direct_manifest_summary.csv \
+  --json reports/direct_manifest_summary.json \
+  --markdown reports/direct_manifest_report.md
+```
+
+For the complementary unique verifiable-CSP benchmark, see
+`docs/UNIQUE_VERIFIABLE_CSP_BENCHMARKS.md`. That stack asks whether a
+natural-language crystal request produced a traceable, retrieval-grounded,
+constraint-faithful, solver-backed, auditable, repairable, and reproducible CSP
+run.
+
+Real run archives can be converted into traceable bundles before scoring:
+
+```bat
+python -m sca.cli convert-run-archive-to-bundle ^
+  --archive path\to\llm_csp_run ^
+  --out-dir reports\traceable_bundles\run_001 ^
+  --run-id run_001
+
+python -m sca.cli convert-run-archives-to-bundles ^
+  --archives-root reports\e2e_runs ^
+  --out-dir reports\traceable_bundles ^
+  --summary reports\traceable_bundle_conversion_summary.csv
+
+python -m sca.cli unique-csp-benchmark-summary ^
+  --bundles reports\traceable_bundles ^
+  --out reports\unique_csp_real_summary.csv ^
+  --json reports\unique_csp_real_summary.json ^
+  --markdown reports\unique_csp_real_report.md
 ```
 
 ## Example Commands

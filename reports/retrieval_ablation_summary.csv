@@ -1,0 +1,13 @@
+prompt_id,retrieval_mode,num_attempts,exit_code,generated_cif_count,parse_validity_rate,pre_dft_validity_rate,composition_match_rate,space_group_match_rate,prototype_match_rate,structure_match_rate,median_rms_dist,mlip_consensus_stable_rate,bad_contact_rate,relax_success_rate,collapse_rate,constraint_satisfaction_rate,evidence_trace_score,stdout,stderr,metric,metadata_vs_none_delta,evidence_spp_vs_none_delta,evidence_spp_vs_metadata_delta
+ablate_batio3,none,1.0,0.0,1.0,1.0,0.5,0.5,0.0,0.25,0.25,0.2,0.25,0.25,0.5,0.2,0.5,0.0,Generated 1 CIFs for: Generate a cubic perovskite BaTiO3 structure.,,,,,
+ablate_batio3,metadata,1.0,0.0,1.0,1.0,1.0,0.5,0.0,0.25,0.25,0.2,0.25,0.0,0.5,0.2,0.5,0.2,Generated 1 CIFs for: Generate a cubic perovskite BaTiO3 structure.,,,,,
+ablate_batio3,evidence_spp,1.0,0.0,1.0,1.0,1.0,1.0,1.0,1.0,0.75,0.05,0.75,0.0,0.8,0.0,1.0,1.0,Generated 1 CIFs for: Generate a cubic perovskite BaTiO3 structure.,,,,,
+ablate_nio,none,1.0,0.0,1.0,1.0,0.5,0.5,0.0,0.25,0.25,0.2,0.25,0.25,0.5,0.2,0.5,0.0,Generated 1 CIFs for: Generate rocksalt NiO.,,,,,
+ablate_nio,metadata,1.0,0.0,1.0,1.0,1.0,0.5,0.0,0.25,0.25,0.2,0.25,0.0,0.5,0.2,0.5,0.2,Generated 1 CIFs for: Generate rocksalt NiO.,,,,,
+ablate_nio,evidence_spp,1.0,0.0,1.0,1.0,1.0,1.0,1.0,1.0,0.75,0.05,0.75,0.0,0.8,0.0,1.0,1.0,Generated 1 CIFs for: Generate rocksalt NiO.,,,,,
+ALL,uplift,,,,,,,,,,,,,,,,,,,pre_dft_validity_rate,0.5,0.5,0.0
+ALL,uplift,,,,,,,,,,,,,,,,,,,prototype_match_rate,0.0,0.75,0.75
+ALL,uplift,,,,,,,,,,,,,,,,,,,structure_match_rate,0.0,0.5,0.5
+ALL,uplift,,,,,,,,,,,,,,,,,,,mlip_consensus_stable_rate,0.0,0.5,0.5
+ALL,uplift,,,,,,,,,,,,,,,,,,,relax_success_rate,0.0,0.30000000000000004,0.30000000000000004
+ALL,uplift,,,,,,,,,,,,,,,,,,,constraint_satisfaction_rate,0.0,0.5,0.5

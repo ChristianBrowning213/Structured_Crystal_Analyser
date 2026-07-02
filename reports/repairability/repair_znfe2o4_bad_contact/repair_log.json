@@ -1,0 +1,6 @@
+{
+  "input_cif": "tests/fixtures/short_contact.cif",
+  "prompt": "Repair ZnFe2O4 spinel with bad Zn-Fe contact.",
+  "detected_failure_type": "synthetic_failure",
+  "repair_action": "write_valid_placeholder_cif"
+}

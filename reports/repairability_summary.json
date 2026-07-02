@@ -1,0 +1,55 @@
+{
+  "rows": [
+    {
+      "case_id": "repair_znfe2o4_bad_contact",
+      "known_failure_type": "bad_contact",
+      "detected_failure_type": "bad_contact",
+      "failure_detected": true,
+      "classification_correct": true,
+      "before_pre_dft_valid": false,
+      "after_pre_dft_valid": true,
+      "before_structure_match": false,
+      "after_structure_match": true,
+      "before_rms_dist": 0.4,
+      "after_rms_dist": 0.2,
+      "before_bad_contact_count": 2,
+      "after_bad_contact_count": 0,
+      "repair_success": true,
+      "repair_notes": "Repaired tests/fixtures/short_contact.cif",
+      "audit_log_complete": true,
+      "exit_code": 0
+    },
+    {
+      "case_id": "repair_wrong_sg_batio3",
+      "known_failure_type": "wrong_space_group",
+      "detected_failure_type": "wrong_space_group",
+      "failure_detected": true,
+      "classification_correct": true,
+      "before_pre_dft_valid": false,
+      "after_pre_dft_valid": true,
+      "before_structure_match": false,
+      "after_structure_match": true,
+      "before_rms_dist": 0.5,
+      "after_rms_dist": 0.25,
+      "before_bad_contact_count": 1,
+      "after_bad_contact_count": 0,
+      "repair_success": true,
+      "repair_notes": "Repaired tests/fixtures/tiny_valid.cif",
+      "audit_log_complete": true,
+      "exit_code": 0
+    },
+    {
+      "case_id": "ALL",
+      "failure_detected_rate": 1.0,
+      "failure_classification_accuracy": 1.0,
+      "repair_attempt_success_rate": 1.0,
+      "validity_improvement_rate": 1.0,
+      "structure_match_improvement_rate": 1.0,
+      "rms_improvement_rate": 1.0,
+      "bad_contact_reduction_rate": 1.0,
+      "relaxation_success_improvement_rate": 1.0,
+      "constraint_satisfaction_improvement_rate": 1.0,
+      "audit_log_complete_rate": 1.0
+    }
+  ]
+}

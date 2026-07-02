@@ -10,3 +10,6 @@ dist/
 *.log
 *.jsonl
 *.csv.tmp
+.pytest_cache/
+.pytest_tmp/
+local_runs/

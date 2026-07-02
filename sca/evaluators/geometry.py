@@ -11,7 +11,13 @@ def evaluate_geometry(structure: Structure) -> GeometryResult:
     warnings: list[str] = []
     errors: list[str] = []
     volume = float(structure.volume)
-    density = float(structure.density)
+    density_error = None
+    try:
+        density = float(structure.density)
+    except Exception as exc:
+        density = None
+        density_error = f"{type(exc).__name__}: {exc}"
+        errors.append(f"density unavailable: {density_error}")
     volume_per_atom = volume / len(structure) if len(structure) else None
     lattice = structure.lattice
 
@@ -19,9 +25,9 @@ def evaluate_geometry(structure: Structure) -> GeometryResult:
         warnings.append("volume_per_atom below 3 A^3")
     if volume_per_atom is not None and volume_per_atom > 120:
         warnings.append("volume_per_atom above 120 A^3")
-    if density <= 0:
+    if density is not None and density <= 0:
         errors.append("density <= 0")
-    if density > 30:
+    if density is not None and density > 30:
         warnings.append("density above 30 g/cm^3")
     if any(length <= 0 for length in (lattice.a, lattice.b, lattice.c)):
         errors.append("lattice length <= 0")
@@ -34,6 +40,7 @@ def evaluate_geometry(structure: Structure) -> GeometryResult:
         volume=volume,
         volume_per_atom=volume_per_atom,
         density=density,
+        density_error=density_error,
         geometry_warning_count=len(warnings),
         geometry_warnings=warnings,
         geometry_error="; ".join(errors) if errors else None,

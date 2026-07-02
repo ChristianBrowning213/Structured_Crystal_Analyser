@@ -1,0 +1,2 @@
+benchmark_id,cif_path,target_formula,target_formation_energy_per_atom,target_band_gap,property_name,target_property_value,target_property_unit,property_tolerance,notes
+atomgpt_example_001,,NaCl,-1.0,,formation_energy_per_atom,-1.0,eV/atom,0.1,Example row only; replace with curated property target.

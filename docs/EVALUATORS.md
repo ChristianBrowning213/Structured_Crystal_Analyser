@@ -12,11 +12,21 @@ energy-above-hull analysis, or experimental validation.
   anonymous matching modes.
 - `spp`: Statistical Pair Potential plausibility scoring from a versioned
   `spp.v1.json` artifact.
+- `cif_parse`: standalone CIF parse and invalid/dummy-species checks for
+  benchmark manifests that want explicit parse output.
+- `geometry`: standalone basic geometry checks.
+- `intent_satisfaction`: deterministic prompt-intent checks for generated CIFs.
+  It compares formula, family/prototype hints, space group or crystal system,
+  motif/coordination/connectivity hints, contact rules, and expected solver
+  status from `intent_constraints_json`. It reports `not_computable` when a
+  component cannot be checked and does not use an LLM judge.
 
 ## Optional Surrogate/MLIP Evaluators
 
 - `alignn`: optional ALIGNN formation-energy prediction.
 - `chgnet_static`: optional CHGNet static surrogate energy and force magnitude.
+- `chgnet_relax`: optional CHGNet relaxation route that writes real relaxed CIFs
+  plus before/after force, energy, RMS, and match columns.
 - `m3gnet_static`: optional MatGL/M3GNet static surrogate energy.
 - `mace_static`: optional MACE ASE calculator route. Supports local
   `SCA_MACE_MODEL` or explicit pretrained `SCA_MACE_PRETRAINED`.
@@ -40,6 +50,26 @@ Paper-comparable A-E summaries are computed after benchmarking with
 `python -m sca.cli paper-benchmark-summary`. They reuse evaluator output columns
 and mark missing structure-match, predicted-hull, relaxation, or novelty inputs
 as not computable. See `docs/PAPER_BENCHMARKS.md`.
+
+Literature-replication reports are available through
+`python -m sca.cli benchmark-cif-set` and
+`python -m sca.cli run-e2e-text-benchmark`; see
+`docs/LITERATURE_REPLICATION_BENCHMARKS.md`.
+
+Unique verifiable-CSP reports add these dependency-free row evaluators:
+
+- `evidence_traceability`
+- `constraint_faithfulness`
+- `solver_certificate`
+- `evidence_faithfulness`
+- `audit_bundle_completeness`
+
+They consume `run_bundle_dir` or `bundle_dir` context and score traceability,
+evidence support, parsed constraint preservation, solver certification, and
+audit-bundle completeness. See `docs/UNIQUE_VERIFIABLE_CSP_BENCHMARKS.md`.
+
+Full Skill-Loop-CSP intent runs combine direct validity, `intent_satisfaction`,
+and unique traceability reports; see `docs/FULL_INTENT_BENCHMARK.md`.
 
 ## SPP Fields
 

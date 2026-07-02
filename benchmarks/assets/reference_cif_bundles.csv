@@ -1,0 +1,5 @@
+bundle_id,dataset_scope,path,required_for,available,notes
+paper_targets_22_reference_cifs,paper_targets_22,benchmarks/paper_targets/reference_cifs,structure_match,true,Prototype/reference CIFs for current 22-target challenge set.
+mp20_subset_reference_cifs,MP-20,benchmarks/dataset_replicas/mp20_subset/reference_cifs,structure_match,false,Placeholder; no large dataset downloaded.
+mpts52_subset_reference_cifs,MPTS-52,benchmarks/dataset_replicas/mpts52_subset/reference_cifs,structure_match,false,Placeholder; no large dataset downloaded.
+chemeleon_chemical_space_reference_cifs,Chemeleon,benchmarks/dataset_replicas/chemeleon_chemical_spaces/reference_cifs,structure_match,false,Placeholder.

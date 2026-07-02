@@ -1,0 +1,3 @@
+case_id,input_cif_path,input_prompt,target_formula,target_structure_family,reference_cif_path,known_failure_type,expected_repair_action,before_bad_contact_count,before_rms_dist,notes
+repair_znfe2o4_bad_contact,tests/fixtures/short_contact.cif,Repair ZnFe2O4 spinel with bad Zn-Fe contact.,ZnFe2O4,spinel,benchmarks/paper_targets/reference_cifs/generated_challenge_znfe2o4_spinel.cif,bad_contact,increase_min_distance,2,0.40,Synthetic bad-contact case
+repair_wrong_sg_batio3,tests/fixtures/tiny_valid.cif,Repair wrong-space-group BaTiO3 toward cubic perovskite.,BaTiO3,perovskite,benchmarks/paper_targets/reference_cifs/sanity_batio3_perovskite.cif,wrong_space_group,enforce_space_group,1,0.50,Synthetic wrong-SG case

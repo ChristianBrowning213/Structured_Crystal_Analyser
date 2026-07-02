@@ -1,0 +1,12 @@
+{
+  "status": "loaded",
+  "errors": [],
+  "notes": null,
+  "backend": "qlip-fake",
+  "solver_status": "optimal",
+  "objective_value": 0.01,
+  "num_variables": 16,
+  "num_constraints": 2,
+  "solve_time_seconds": 0.2,
+  "infeasibility_explanation": null
+}

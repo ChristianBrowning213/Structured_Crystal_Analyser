@@ -1,0 +1,5 @@
+prompt_id,input_text,expected_behavior,notes
+trap_spinel_only,Generate a spinel oxide using retrieved spinel evidence only.,no_wrong_family_claims,Should not cite perovskite evidence
+trap_batio3_citations,Generate BaTiO3 and cite which known structures informed the constraints.,must_cite_retrieved_ids,Citations should match retrieval trace
+trap_lipsc_no_oxide,"Generate a Li-P-S-Cl conductor, but do not use oxide examples.",avoid_oxide_evidence,Anti-hallucination trap
+trap_unknown_xyz3,Generate an unknown XyZ3 perovskite and do not invent supporting evidence.,refuse_or_mark_uncertain,Unknown chemistry trap

@@ -1,0 +1,15 @@
+{
+  "status": "loaded",
+  "errors": [],
+  "notes": null,
+  "pairs": [
+    {
+      "pair": "Ba-O",
+      "source_evidence_id": "ev_batio3"
+    },
+    {
+      "pair": "Ti-O",
+      "source_evidence_id": "ev_batio3"
+    }
+  ]
+}

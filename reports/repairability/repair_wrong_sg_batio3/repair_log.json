@@ -1,0 +1,6 @@
+{
+  "input_cif": "tests/fixtures/tiny_valid.cif",
+  "prompt": "Repair wrong-space-group BaTiO3 toward cubic perovskite.",
+  "detected_failure_type": "synthetic_failure",
+  "repair_action": "write_valid_placeholder_cif"
+}

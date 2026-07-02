@@ -6,6 +6,14 @@ paper-derived target subsets and comparable protocol checks. It is not a full
 MP-20, MPTS-52, or other leaderboard reproduction unless the manifest explicitly
 uses that full dataset and protocol.
 
+For direct CIF and end-to-end literature comparator reports, see
+`docs/LITERATURE_REPLICATION_BENCHMARKS.md`.
+
+For the complementary traceable workflow benchmark, see
+`docs/UNIQUE_VERIFIABLE_CSP_BENCHMARKS.md`. That stack asks whether a run is
+retrieval-grounded, constraint-faithful, solver-backed, auditable, repairable,
+and reproducible.
+
 ## Benchmark Groups
 
 - `A_validity`: parse, composition, pre-DFT validity, geometry, contacts.
@@ -23,10 +31,13 @@ Missing inputs produce not-computable rows instead of crashes.
 
 - `benchmarks/paper_targets/paper_targets_v1.csv`
 - `benchmarks/paper_targets/comparator_values_v1.csv`
+- `benchmarks/paper_targets/reference_cifs_v1.csv`
+- `benchmarks/paper_targets/reference_cifs/`
 
-Fill `reference_cif_path` before interpreting `B_structure_reproduction`
-StructureMatcher metrics. Fill or pass a hull reference before interpreting
-predicted hull metrics.
+`reference_cifs_v1.csv` records the auditable prototype references used for the
+22 generated challenge targets. These are not generated CIFs and should not be
+treated as DFT-relaxed ground truth. Fill or pass a hull reference before
+interpreting predicted hull metrics.
 
 ## Example 1: Generated Folder
 
@@ -36,7 +47,8 @@ Build a run manifest that maps generated CIFs to paper target rows:
 python -m sca.cli build-paper-run-manifest ^
   --targets benchmarks\paper_targets\paper_targets_v1.csv ^
   --generated-folder "C:\Users\brown\Downloads\example created cifs" ^
-  --out benchmarks\paper_targets\generated_manifest.csv
+  --out benchmarks\paper_targets\generated_manifest.csv ^
+  --unmatched-out benchmarks\paper_targets\unmatched_generated_cifs.csv
 ```
 
 Then benchmark that manifest so paper metadata such as `benchmark_id`,
@@ -44,7 +56,7 @@ Then benchmark that manifest so paper metadata such as `benchmark_id`,
 
 ```bat
 python -m sca.cli benchmark manifest benchmarks\paper_targets\generated_manifest.csv ^
-  --evaluators pre_dft_validity,structure_match,chgnet_static,m3gnet_static,mace_static,sevennet_static,mlip_ensemble ^
+  --evaluators pre_dft_validity,structure_match,novelty,chgnet_static,chgnet_relax,m3gnet_static,mace_static,sevennet_static,mlip_ensemble ^
   --path-col cif_path ^
   --formula-col target_formula ^
   --spacegroup-col target_space_group ^
@@ -52,23 +64,53 @@ python -m sca.cli benchmark manifest benchmarks\paper_targets\generated_manifest
   --target-reference-id-col reference_id ^
   --method-col paper_source ^
   --query-id-col benchmark_id ^
-  --out reports\paper_targets_manifest_results.csv ^
-  --jsonl reports\paper_targets_manifest_results.jsonl
+  --out reports\paper_targets_results.csv ^
+  --jsonl reports\paper_targets_results.jsonl
 ```
+
+For a CPU-friendly CHGNet relaxation pass on Windows CMD, set optional relaxation
+knobs before the benchmark command:
+
+```bat
+set SCA_CHGNET_RELAX_STEPS=50
+set SCA_CHGNET_RELAX_FMAX=0.1
+set SCA_CHGNET_RELAX_OUT_DIR=reports\paper_targets_chgnet_relaxed
+```
+
+Unset them afterwards if you do not want later runs to inherit those settings.
 
 ## Example 2: Summarize Against Manifest
 
 ```bat
-python -m sca.cli paper-benchmark-summary reports\paper_targets_manifest_results.csv ^
-  --manifest benchmarks\paper_targets\generated_manifest.csv ^
+python -m sca.cli paper-benchmark-summary reports\paper_targets_results.csv ^
+  --manifest benchmarks\paper_targets\paper_targets_v1.csv ^
   --comparator-values benchmarks\paper_targets\comparator_values_v1.csv ^
   --include-built-in-comparators ^
-  --out reports\paper_targets_manifest_summary.csv ^
-  --json reports\paper_targets_manifest_summary.json ^
-  --markdown reports\paper_targets_manifest_report.md
+  --out reports\paper_benchmark_summary.csv ^
+  --json reports\paper_benchmark_summary.json ^
+  --markdown reports\paper_benchmark_report.md
 ```
 
-## Example 3: With Hull Reference
+## Example 3: Per-Target Diagnostics
+
+Use this after the benchmark and paper summary to classify each target's success
+or failure without changing the benchmark metrics:
+
+```bat
+python -m sca.cli paper-target-diagnostics ^
+  --results reports\paper_targets_results.csv ^
+  --manifest benchmarks\paper_targets\generated_manifest.csv ^
+  --references benchmarks\paper_targets\reference_cifs_v1.csv ^
+  --out reports\paper_target_diagnostics.csv ^
+  --json reports\paper_target_diagnostics.json ^
+  --markdown reports\paper_target_diagnostics.md
+```
+
+Diagnostics rows include `primary_category`, `category_flags`,
+`relaxation_effect`, `reference_risk`, parsed generated/reference/relaxed space
+groups, volume ratios, and the raw structure-match and relaxation evidence.
+
+## Example 4: With Hull Reference
 
 ```bat
 python -m sca.cli benchmark manifest benchmarks\paper_targets\generated_manifest.csv ^

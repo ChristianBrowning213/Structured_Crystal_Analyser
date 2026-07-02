@@ -1,0 +1,20 @@
+{
+  "status": "loaded",
+  "errors": [],
+  "notes": null,
+  "query": "BaTiO3 perovskite",
+  "mode": "evidence_spp",
+  "retrieved": [
+    {
+      "evidence_id": "ev_batio3",
+      "formula": "BaTiO3",
+      "chemical_system": null,
+      "family": "perovskite",
+      "space_group": 221,
+      "cif_path": null,
+      "score": 0.95,
+      "citation": null,
+      "parseable": true
+    }
+  ]
+}

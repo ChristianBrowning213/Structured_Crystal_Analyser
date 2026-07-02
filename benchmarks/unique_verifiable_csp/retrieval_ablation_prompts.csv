@@ -1,0 +1,3 @@
+prompt_id,input_text,target_formula,target_structure_family,target_space_group,reference_cif_path,num_attempts,notes
+ablate_batio3,Generate a cubic perovskite BaTiO3 structure.,BaTiO3,perovskite,221,../paper_targets/reference_cifs/sanity_batio3_perovskite.cif,1,Compare retrieval modes
+ablate_nio,Generate rocksalt NiO.,NiO,rocksalt,225,../paper_targets/reference_cifs/sanity_nio_rocksalt.cif,1,Compare retrieval modes

@@ -1,0 +1,10 @@
+metric,num_result_rows,num_bundle_rows,output_validity,constraint_faithfulness_score,structure_or_prototype_match_score,mlip_or_relaxation_robustness_score,evidence_trace_score,audit_bundle_score,solver_certificate_score,traceable_constraint_grounded_csp_score,value
+traceable_constraint_grounded_csp_score,0.0,5.0,0.0,0.5,0.0,0.0,0.9500000000000001,0.5277777777777778,1.0,0.3452777777777778,
+output_validity,,,,,,,,,,,0.0
+constraint_faithfulness_score,,,,,,,,,,,0.5
+structure_or_prototype_match_score,,,,,,,,,,,0.0
+mlip_or_relaxation_robustness_score,,,,,,,,,,,0.0
+evidence_trace_score,,,,,,,,,,,0.9500000000000001
+audit_bundle_score,,,,,,,,,,,0.5277777777777778
+solver_certificate_score,,,,,,,,,,,1.0
+traceable_constraint_grounded_csp_score,,,,,,,,,,,0.3452777777777778

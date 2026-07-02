@@ -41,6 +41,11 @@ SCA does not run DFT and does not compute real energy above hull.
 
 ## CLI Usage
 
+Full intent benchmarks use Skill-Loop-CSP as the generator and SCA as the
+controller/evaluator. See `docs/FULL_INTENT_BENCHMARK.md` for the seeded 100
+prompt workflow, including generation, archive collection, intent satisfaction,
+unique traceability summaries, and the final report.
+
 Single CIF:
 
 ```bash
@@ -123,6 +128,77 @@ sca select-top-k reports/pre_dft_eval.csv \
 ```
 
 The original ALIGNN-only commands remain available under `sca alignn`.
+
+## Literature-Replication Benchmarks
+
+List built-in literature comparator protocols:
+
+```bash
+python -m sca.cli list-benchmark-protocols
+```
+
+Run a direct CIF-set comparator report:
+
+```bash
+python -m sca.cli benchmark-cif-set \
+  --manifest benchmarks/paper_targets/generated_manifest.csv \
+  --protocols all \
+  --out reports/direct_manifest_results.csv \
+  --summary reports/direct_manifest_summary.csv \
+  --json reports/direct_manifest_summary.json \
+  --markdown reports/direct_manifest_report.md
+```
+
+Run an end-to-end prompt benchmark by providing a generator command template:
+
+```bash
+python -m sca.cli run-e2e-text-benchmark \
+  --prompts benchmarks/e2e_text_prompts/e2e_prompts_v1.csv \
+  --generator-command "python tests/fixtures/fake_generator.py --prompt {prompt} --out-dir {out_dir} --attempts {num_attempts}" \
+  --out-dir reports/e2e_fake_runs \
+  --num-attempts 3 \
+  --protocols all \
+  --summary reports/e2e_fake_summary.csv \
+  --markdown reports/e2e_fake_report.md
+```
+
+See `docs/LITERATURE_REPLICATION_BENCHMARKS.md` for Windows CMD commands,
+protocol-match caveats, and dataset scaffold details.
+
+## Unique Verifiable CSP Benchmarks
+
+The literature-replication commands ask whether generated CIFs match paper metrics. The unique CSP benchmark asks whether a text-to-crystal run is traceable, retrieval-grounded, constraint-faithful, solver-backed, auditable, repairable, and reproducible.
+
+```bat
+python -m sca.cli inspect-run-bundle --help
+python -m sca.cli run-retrieval-ablation-benchmark --help
+python -m sca.cli run-repairability-benchmark --help
+python -m sca.cli unique-csp-benchmark-summary --help
+```
+
+See `docs/UNIQUE_VERIFIABLE_CSP_BENCHMARKS.md` for Windows CMD commands,
+synthetic smoke fixtures, and details on the unique workflow-audit score.
+
+Convert real or archived LLM-CSP/QLIP runs into traceable bundles before running
+the unique benchmark:
+
+```bat
+python -m sca.cli convert-run-archive-to-bundle ^
+  --archive path\to\llm_csp_run ^
+  --out-dir reports\traceable_bundles\run_001 ^
+  --run-id run_001
+
+python -m sca.cli convert-run-archives-to-bundles ^
+  --archives-root reports\e2e_runs ^
+  --out-dir reports\traceable_bundles ^
+  --summary reports\traceable_bundle_conversion_summary.csv
+
+python -m sca.cli unique-csp-benchmark-summary ^
+  --bundles reports\traceable_bundles ^
+  --out reports\unique_csp_real_summary.csv ^
+  --json reports\unique_csp_real_summary.json ^
+  --markdown reports\unique_csp_real_report.md
+```
 
 ## Python Library Usage
 

@@ -1,0 +1,4 @@
+chemical_space,allowed_elements,example_targets,required_hull_bundle,metrics,notes
+Ti-O,Ti;O,TiO2,ti_o_hull,"validity,relax_success_rate,predicted_ehull_rate_0_15",Example scaffold row only.
+Zn-Ti-O,Zn;Ti;O,ZnTiO3;Zn2TiO4,zn_ti_o_hull,"validity,predicted_ehull_rate_0_15",Example scaffold row only.
+Li-P-S-Cl,Li;P;S;Cl,Li6PS5Cl;Li5PS4Cl,li_p_s_cl_hull,"stable_count,metastable_count,within_threshold_rate_0_15",Example scaffold row only.

@@ -1,0 +1,3 @@
+bundle_id,dataset_scope,path,required_for,available,notes
+atomgpt_property_targets,AtomGPT,benchmarks/dataset_replicas/atomgpt_property/property_targets.csv,property_targets,true,Example property target schema.
+mp20_property_targets,MP-20,benchmarks/dataset_replicas/mp20_subset/property_targets.csv,property_targets,false,Placeholder.

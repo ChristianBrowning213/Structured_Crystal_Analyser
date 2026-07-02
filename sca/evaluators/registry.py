@@ -52,6 +52,21 @@ _REGISTRY: dict[str, EvaluatorSpec] = {
         description="CrystaLLM-style parse, composition, symmetry, multiplicity, contact, geometry, duplicate, and novelty checks.",
         factory_path="sca.evaluators.pre_dft_validity:PreDftValidityBenchmarkEvaluator",
     ),
+    "cif_parse": EvaluatorSpec(
+        name="cif_parse",
+        description="Standalone CIF parse and invalid-species checks.",
+        factory_path="sca.evaluators.intent_satisfaction:CifParseBenchmarkEvaluator",
+    ),
+    "geometry": EvaluatorSpec(
+        name="geometry",
+        description="Standalone basic geometry checks.",
+        factory_path="sca.evaluators.intent_satisfaction:GeometryBenchmarkEvaluator",
+    ),
+    "intent_satisfaction": EvaluatorSpec(
+        name="intent_satisfaction",
+        description="Deterministic prompt-intent satisfaction checks for generated CIFs.",
+        factory_path="sca.evaluators.intent_satisfaction:IntentSatisfactionBenchmarkEvaluator",
+    ),
     "alignn": EvaluatorSpec(
         name="alignn",
         description="Optional ALIGNN formation-energy prediction evaluator.",
@@ -63,6 +78,11 @@ _REGISTRY: dict[str, EvaluatorSpec] = {
         description="StructureMatcher target-CIF match evaluator with exact and anonymous modes.",
         factory_path="sca.evaluators.structure_match:StructureMatchBenchmarkEvaluator",
     ),
+    "novelty": EvaluatorSpec(
+        name="novelty",
+        description="Local novelty check against a supplied reference corpus.",
+        factory_path="sca.evaluators.novelty_benchmark:NoveltyBenchmarkEvaluator",
+    ),
     "spp": EvaluatorSpec(
         name="spp",
         description="Statistical Pair Potential plausibility scorer.",
@@ -72,6 +92,13 @@ _REGISTRY: dict[str, EvaluatorSpec] = {
         name="chgnet_static",
         description="Optional CHGNet static surrogate-energy evaluator.",
         factory_path="sca.evaluators.chgnet:ChgnetStaticBenchmarkEvaluator",
+        optional_dependencies=("chgnet",),
+        block_on_missing_dependencies=False,
+    ),
+    "chgnet_relax": EvaluatorSpec(
+        name="chgnet_relax",
+        description="Optional CHGNet relaxation with before/after force, energy, and reference-match metrics.",
+        factory_path="sca.evaluators.chgnet_relax:ChgnetRelaxBenchmarkEvaluator",
         optional_dependencies=("chgnet",),
         block_on_missing_dependencies=False,
     ),
@@ -110,6 +137,31 @@ _REGISTRY: dict[str, EvaluatorSpec] = {
         name="predicted_hull",
         description="Predicted/surrogate energy-above-hull from local phase diagram entries.",
         factory_path="sca.evaluators.property:PredictedHullBenchmarkEvaluator",
+    ),
+    "evidence_traceability": EvaluatorSpec(
+        name="evidence_traceability",
+        description="Audits retrieved evidence relevance and links from evidence to constraints.",
+        factory_path="sca.evaluators.unique_csp:EvidenceTraceabilityBenchmarkEvaluator",
+    ),
+    "constraint_faithfulness": EvaluatorSpec(
+        name="constraint_faithfulness",
+        description="Checks output rows against prompt-derived formula, SG, family, and contact constraints.",
+        factory_path="sca.evaluators.unique_csp:ConstraintFaithfulnessBenchmarkEvaluator",
+    ),
+    "solver_certificate": EvaluatorSpec(
+        name="solver_certificate",
+        description="Audits solver status, feasibility, objective, counts, timing, and infeasibility evidence.",
+        factory_path="sca.evaluators.unique_csp:SolverCertificateBenchmarkEvaluator",
+    ),
+    "evidence_faithfulness": EvaluatorSpec(
+        name="evidence_faithfulness",
+        description="Checks final explanations for unsupported retrieved-evidence claims.",
+        factory_path="sca.evaluators.unique_csp:EvidenceFaithfulnessBenchmarkEvaluator",
+    ),
+    "audit_bundle_completeness": EvaluatorSpec(
+        name="audit_bundle_completeness",
+        description="Checks traceable CSP bundle artifact completeness and reproducibility metadata.",
+        factory_path="sca.evaluators.unique_csp:AuditBundleCompletenessBenchmarkEvaluator",
     ),
 }
 

@@ -1,0 +1,6 @@
+bundle_id,dataset_scope,path,required_for,available,notes
+ti_o_hull,Ti-O,benchmarks/dataset_replicas/chemeleon_chemical_spaces/hulls/ti_o.csv,predicted_hull,false,Placeholder for local Ti-O phase entries.
+zn_ti_o_hull,Zn-Ti-O,benchmarks/dataset_replicas/chemeleon_chemical_spaces/hulls/zn_ti_o.csv,predicted_hull,false,Placeholder for local Zn-Ti-O phase entries.
+li_p_s_cl_hull,Li-P-S-Cl,benchmarks/dataset_replicas/chemeleon_chemical_spaces/hulls/li_p_s_cl.csv,predicted_hull,false,Placeholder for local Li-P-S-Cl phase entries.
+prototype_22_hulls,paper_targets_22,benchmarks/paper_targets/hulls/prototype_22.csv,predicted_hull,false,Placeholder.
+mp20_subset_hulls,MP-20,benchmarks/dataset_replicas/mp20_subset/hulls/mp20_subset.csv,predicted_hull,false,Placeholder.

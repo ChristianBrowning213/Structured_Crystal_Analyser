@@ -1,0 +1,4 @@
+prompt_id,input_text,expected_status,expected_failure_type
+impossible_rocksalt_ab3,Generate a rocksalt AB3 crystal in a two-site primitive rocksalt cell.,infeasible,composition_site_mismatch
+too_short_batio3,Generate cubic BaTiO3 but force all Ba-O distances below 1.0 A.,infeasible,distance_constraint_conflict
+bad_charge_balance,Generate a charge-balanced NaCl2 rocksalt structure.,infeasible_or_invalid,charge_or_composition_conflict

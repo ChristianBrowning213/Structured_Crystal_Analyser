@@ -1,0 +1,12 @@
+{
+  "status": "loaded_from_log",
+  "errors": [],
+  "notes": "tests\\fixtures\\run_archives\\invalid_json\\solver.log",
+  "backend": "log",
+  "solver_status": "optimal",
+  "objective_value": null,
+  "num_variables": null,
+  "num_constraints": null,
+  "solve_time_seconds": null,
+  "infeasibility_explanation": null
+}

@@ -1,0 +1,20 @@
+{
+  "status": "loaded",
+  "errors": [],
+  "notes": null,
+  "query": null,
+  "mode": null,
+  "retrieved": [
+    {
+      "evidence_id": "ev_ceo2",
+      "formula": "CeO2",
+      "chemical_system": null,
+      "family": "fluorite",
+      "space_group": null,
+      "cif_path": null,
+      "score": null,
+      "citation": null,
+      "parseable": true
+    }
+  ]
+}

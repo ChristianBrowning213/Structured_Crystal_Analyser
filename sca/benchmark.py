@@ -11,7 +11,7 @@ from tqdm import tqdm
 from sca.evaluators.pre_dft_validity import PreDftValidityBenchmarkEvaluator
 from sca.evaluators.registry import create_evaluator
 from sca.evaluators.uniqueness import assign_duplicate_groups
-from sca.io import discover_cif_files, load_manifest_frame
+from sca.io import discover_cif_files, load_manifest_frame, resolve_manifest_path
 from sca.pipelines.crystallm_style import evaluate_one_cif
 from sca.scoring import compute_rank_score
 from sca.schemas import BenchmarkEvaluatorResult, BenchmarkRecord, CrystalEvalRecord
@@ -139,8 +139,10 @@ def benchmark_manifest(
                 "path": Path(str(row[path_col])),
                 "target_formula": _optional_cell(row, formula_col, frame.columns),
                 "target_space_group": _optional_cell(row, spacegroup_col, frame.columns),
-                "target_cif_path": _optional_path_cell(row, target_cif_col, frame.columns, manifest_csv),
-                "reference_id": _optional_cell(row, reference_id_col, frame.columns),
+                "target_cif_path": _optional_path_cell(row, target_cif_col, frame.columns, manifest_csv)
+                or _optional_path_cell(row, "reference_cif_path", frame.columns, manifest_csv),
+                "reference_id": _optional_cell(row, reference_id_col, frame.columns)
+                or _optional_cell(row, "target_reference_id", frame.columns),
                 "structure_match_mode": structure_match_mode,
                 "spp_artifact": str(spp_artifact) if spp_artifact else None,
                 "hull_reference_path": str(hull_reference_path) if hull_reference_path else None,
@@ -355,10 +357,7 @@ def _optional_path_cell(row, column: str | None, columns, manifest_csv: str | Pa
     value = _optional_cell(row, column, columns)
     if value is None:
         return None
-    path = Path(value)
-    if path.is_absolute():
-        return str(path)
-    return str((Path(manifest_csv).parent / path).resolve())
+    return str(resolve_manifest_path(value, manifest_csv))
 
 
 def _add_item_context(flattened: dict, item: dict) -> None:

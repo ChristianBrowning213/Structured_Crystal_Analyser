@@ -1,0 +1,53 @@
+benchmark_family,metric_name,our_value,paper_value,paper_name,comparator_name,direction,unit,beats_paper,delta,dataset_scope,protocol_match_level,n_total,n_computable,n_not_computable,required_inputs_missing,notes
+E_property,formation_energy_mae,,0.033,ALIGNN baseline,alignn_formation_energy_mae,lower_is_better,eV/atom,,,property_target_set,not_comparable,22,0,22,formation_energy_error,ALIGNN formation-energy MAE baseline 0.033 eV/atom
+E_property,formation_energy_mae,,0.072,AtomGPT,atomgpt_formation_energy_mae,lower_is_better,eV/atom,,,property_target_set,not_comparable,22,0,22,formation_energy_error,AtomGPT formation-energy MAE 0.072 eV/atom
+C_mlip_stability,predicted_ehull_rate_0_15,,0.28,Crystal-text LLM,cdvae_metastable_28,higher_is_better,,,,paper_reported,not_comparable,22,0,22,predicted_energy_above_hull,CDVAE metastable rate 28%; not_computable
+C_mlip_stability,predicted_ehull_rate_0_15,,0.15,Chemeleon,chemeleon_ehull_threshold_0_15,threshold_upper,eV/atom,,,paper_reported,not_comparable,22,0,22,predicted_energy_above_hull,Chemeleon metastable threshold <0.15 eV/atom; not_computable
+C_mlip_stability,metastable_count,,435.0,Chemeleon,chemeleon_lip_s_cl_metastable_count_435,higher_is_better,count,,,Li-P-S-Cl,not_comparable,22,0,22,predicted_energy_above_hull,Chemeleon Li-P-S-Cl generated metastable 435; not_computable
+C_mlip_stability,stable_count,,17.0,Chemeleon,chemeleon_lip_s_cl_stable_count_17,higher_is_better,count,,,Li-P-S-Cl,not_comparable,22,0,22,predicted_energy_above_hull,Chemeleon Li-P-S-Cl generated stable 17; not_computable
+C_mlip_stability,within_threshold_rate_0_15,,0.8,Chemeleon,chemeleon_lip_s_cl_within_80,higher_is_better,,,,Li-P-S-Cl,not_comparable,22,0,22,predicted_energy_above_hull,Chemeleon Li-P-S-Cl within threshold ~80%; not_computable
+D_relaxation,relax_success_rate,,0.9817850637522769,Chemeleon,chemeleon_tio2_convergence_982,higher_is_better,,,,Ti-O,not_comparable,22,0,22,relax_ok,Chemeleon TiO2 convergence 539/549; not_computable
+A_validity,pre_dft_validity_rate,0.8636363636363636,0.98,Chemeleon,chemeleon_validity_98,higher_is_better,,False,-0.11636363636363634,paper_reported,contextual_only,22,22,0,,Chemeleon validity/no-overlap 98-99%; Use as contextual unless using Chemeleon protocol.
+A_validity,pre_dft_validity_rate,0.8636363636363636,0.99,Chemeleon,chemeleon_validity_99,higher_is_better,,False,-0.12636363636363634,paper_reported,contextual_only,22,22,0,,Chemeleon validity/no-overlap 98-99%; Upper end of reported range.
+A_validity,composition_and_sg_match_rate,0.0,0.74,CrysText,crystext_comp_sg_74,higher_is_better,,False,-0.74,paper_reported,contextual_only,22,22,0,,CrysText composition + SG satisfaction 74%
+A_validity,composition_match_rate,1.0,0.95,CrysText,crystext_composition_95,higher_is_better,,True,0.050000000000000044,paper_reported,contextual_only,22,22,0,,CrysText composition satisfaction 95%
+B_structure_reproduction,match_rate_n1,0.09090909090909091,0.57,CrysText,crystext_mp20_n1_match_rate,higher_is_better,,False,-0.479090909090909,MP-20,contextual_only,22,22,0,,CrysText MP-20 N=1 match rate 57%
+B_structure_reproduction,match_rate_nk,0.09090909090909091,0.73,CrysText,crystext_mp20_n20_match_rate,higher_is_better,,False,-0.639090909090909,MP-20,contextual_only,22,22,0,,CrysText MP-20 N=20 match rate 73%
+B_structure_reproduction,best_of_k_rms,0.0,0.0243,CrysText,crystext_mp20_n20_rmse,lower_is_better,,True,-0.0243,MP-20,contextual_only,22,1,21,,CrysText MP-20 RMSE N=20 0.0243
+A_validity,space_group_match_rate,0.0,0.74,CrysText,crystext_space_group_74,higher_is_better,,False,-0.74,paper_reported,contextual_only,22,22,0,,CrysText space-group satisfaction 74%
+B_structure_reproduction,structure_match_rate,0.09090909090909091,0.6392,Lang2Str,lang2str_mp20_match_rate,higher_is_better,,False,-0.548290909090909,MP-20,contextual_only,22,22,0,,Lang2Str MP-20 MR 63.92%
+D_relaxation,relaxed_rms_dist,,0.055,Lang2Str,lang2str_mp20_relaxed_rmse,lower_is_better,,,,MP-20,not_comparable,22,0,22,"rms_dist_after,relaxed_rms_dist",Lang2Str relaxed RMSE 0.055; not_computable
+B_structure_reproduction,mean_rms_dist,0.0,0.076,Lang2Str,lang2str_mp20_rmse,lower_is_better,,True,-0.076,MP-20,contextual_only,22,1,21,,Lang2Str MP-20 RMSE 0.076
+B_structure_reproduction,structure_match_rate,0.09090909090909091,0.2836,Lang2Str,lang2str_mpts52_match_rate,higher_is_better,,False,-0.1926909090909091,MPTS-52,contextual_only,22,22,0,,Lang2Str MPTS-52 MR 28.36%
+B_structure_reproduction,mean_rms_dist,0.0,0.1424,Lang2Str,lang2str_mpts52_rmse,lower_is_better,,True,-0.1424,MPTS-52,contextual_only,22,1,21,,Lang2Str MPTS-52 RMSE 0.1424
+C_mlip_stability,predicted_ehull_rate_0_15,,0.49,Crystal-text LLM,llama2_70b_metastable_49,higher_is_better,,,,paper_reported,not_comparable,22,0,22,predicted_energy_above_hull,LLaMA-2 70B metastable rate 49%; not_computable
+A_validity,min_distance_pass_rate,1.0,0.5,CrystaLLM / Chemeleon,min_distance_0_5_crystallm,threshold_lower,angstrom,True,0.5,paper_reported,contextual_only,22,17,5,,Minimum distance >0.5 A
+A_validity,pre_dft_validity_rate,0.8636363636363636,0.9,Crystal-text LLM / Gruver et al.,validity_gruver_90,higher_is_better,,False,-0.036363636363636376,paper_reported,contextual_only,22,22,0,,Crystal-text LLM physical validity ~90%; Contextual physical-validity comparator.
+A_validity,parse_validity_rate,1.0,,,,,,,,,,22,22,0,,
+A_validity,bad_contact_rate,0.13636363636363635,,,,,,,,,,22,22,0,,
+A_validity,median_min_distance,1.9918584287042087,,,,,angstrom,,,,,22,17,5,,
+B_structure_reproduction,anonymous_match_rate,0.09090909090909091,,,,,,,,,,22,22,0,,
+B_structure_reproduction,supercell_match_rate,0.0,,,,,,,,,,22,22,0,,
+B_structure_reproduction,median_rms_dist,0.0,,,,,,,,,,22,1,21,,
+B_structure_reproduction,best_rms_dist,0.0,,,,,,,,,,22,1,21,,
+B_structure_reproduction,best_of_k_mlip_score,,,,,,,,,,,22,0,22,"mlip_energy_mean,benchmark_id",not_computable
+B_structure_reproduction,best_of_k_relaxed_rms,,,,,,,,,,,22,0,22,"rms_dist_after,relaxed_rms_dist,benchmark_id",not_computable
+D_relaxation,rmse_improvement,,,,,,,,,,,22,0,22,"rms_dist_before,rms_dist_after",not_computable
+C_mlip_stability,predicted_ehull_rate_0_00,,,,,,,,,,,22,0,22,predicted_energy_above_hull,not_computable
+C_mlip_stability,predicted_ehull_rate_0_05,,,,,,,,,,,22,0,22,predicted_energy_above_hull,not_computable
+C_mlip_stability,predicted_ehull_rate_0_10,,,,,,,,,,,22,0,22,predicted_energy_above_hull,not_computable
+C_mlip_stability,mlip_consensus_stable_rate,,,,,,,,,,,22,0,22,mlip_consensus_stable_flag,not_computable
+C_mlip_stability,mlip_disagreement_rate,,,,,,,,,,,22,0,22,mlip_disagreement_flag,not_computable
+C_mlip_stability,within_threshold_count,,,,,,,,,,,22,0,22,predicted_energy_above_hull,not_computable
+D_relaxation,median_energy_drop,,,,,,,,,,,22,0,22,energy_drop_per_atom,not_computable
+D_relaxation,median_max_force_before,,,,,,,,,,,22,0,22,max_force_before,not_computable
+D_relaxation,median_max_force_after,,,,,,,,,,,22,0,22,max_force_after,not_computable
+D_relaxation,force_threshold_success_rate_0_20,,,,,,,,,,,22,0,22,max_force_after,not_computable
+D_relaxation,force_threshold_success_rate_0_10,,,,,,,,,,,22,0,22,max_force_after,not_computable
+D_relaxation,rms_before,,,,,,,,,,,22,0,22,rms_dist_before,not_computable
+D_relaxation,rms_after,,,,,,,,,,,22,0,22,"rms_dist_after,relaxed_rms_dist",not_computable
+D_relaxation,rms_improvement_rate,,,,,,,,,,,22,0,22,"rms_dist_before,rms_dist_after",not_computable
+D_relaxation,collapse_rate,,,,,,,,,,,22,0,22,"relax_error,volume,relaxed_volume",not_computable
+E_property,band_gap_mae,,,,,,,,,,,22,0,22,band_gap_error,
+E_property,target_property_mae,,,,,,,,,,,22,0,22,property_error,
+E_property,property_hit_rate_within_tolerance,0.0,,,,,,,,,,22,22,0,,

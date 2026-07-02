@@ -1,0 +1,58 @@
+{
+  "run_id": "invalid_json",
+  "prompt_id": "invalid_json",
+  "input_text": "Generate invalid-json archive.",
+  "timestamp": null,
+  "run_dir": "tests\\fixtures\\run_archives\\invalid_json",
+  "manifest_row": {},
+  "files": {
+    "prompt": "tests\\fixtures\\run_archives\\invalid_json\\prompt.txt",
+    "retrieval_trace": "tests\\fixtures\\run_archives\\invalid_json\\retrieval_trace.json",
+    "solver_trace": "tests\\fixtures\\run_archives\\invalid_json\\solver.log"
+  },
+  "checksums": {},
+  "status": "converted_with_missing_artifacts",
+  "errors": [
+    "retrieval_trace.json: JSONDecodeError: Expecting value: line 2 column 1 (char 16)",
+    "missing_source_artifact:structured_intent",
+    "missing_source_artifact:retrieval_trace",
+    "missing_source_artifact:constraint_trace",
+    "missing_source_artifact:validation_trace",
+    "missing_source_artifact:diagnostics_trace",
+    "missing_source_artifact:final_decision"
+  ],
+  "notes": "Converted by sca.traceability.adapters.llm_csp_archive.",
+  "structured_intent": null,
+  "retrieval_trace": null,
+  "constraint_trace": null,
+  "spp_trace": null,
+  "solver_trace": {
+    "status": "loaded_from_log",
+    "errors": [],
+    "notes": "tests\\fixtures\\run_archives\\invalid_json\\solver.log",
+    "backend": "log",
+    "solver_status": "optimal",
+    "objective_value": null,
+    "num_variables": null,
+    "num_constraints": null,
+    "solve_time_seconds": null,
+    "infeasibility_explanation": null
+  },
+  "generated_candidates": {
+    "status": "loaded",
+    "errors": [],
+    "notes": null,
+    "candidates": [
+      {
+        "candidate_id": "candidate_001",
+        "cif_path": "tests\\fixtures\\run_archives\\invalid_json\\candidate.cif",
+        "source_path": "tests\\fixtures\\run_archives\\invalid_json\\candidate.cif",
+        "rank": 1
+      }
+    ]
+  },
+  "validation_trace": null,
+  "relaxation_trace": null,
+  "diagnostics_trace": null,
+  "final_decision": null
+}

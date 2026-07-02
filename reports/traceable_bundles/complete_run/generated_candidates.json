@@ -1,0 +1,13 @@
+{
+  "status": "loaded",
+  "errors": [],
+  "notes": null,
+  "candidates": [
+    {
+      "candidate_id": "candidate_001",
+      "cif_path": "cifs\\candidate_001.cif",
+      "source_path": "tests\\fixtures\\run_archives\\complete_run\\candidate_001.cif",
+      "rank": 1
+    }
+  ]
+}
