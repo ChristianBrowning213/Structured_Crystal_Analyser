@@ -10,6 +10,7 @@ from pymatgen.analysis.structure_matcher import StructureMatcher
 from pymatgen.core import Structure
 
 from sca.evaluators.cif_parse import parse_cif
+from sca.io import resolve_manifest_path
 from sca.schemas import NoveltyResult
 
 
@@ -53,8 +54,7 @@ def load_reference_structures_with_stats(
         if path_col not in frame.columns:
             raise ValueError(f"Reference manifest path column '{path_col}' not found")
         for index, row in frame.iterrows():
-            raw_path = Path(str(row[path_col]))
-            path = raw_path if raw_path.is_absolute() else (manifest.parent / raw_path).resolve()
+            path = resolve_manifest_path(row[path_col], manifest)
             ref_id = str(row[id_col]) if id_col and id_col in frame.columns else str(path)
             paths.append((ref_id, path))
 

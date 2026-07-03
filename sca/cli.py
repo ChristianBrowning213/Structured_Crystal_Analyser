@@ -20,6 +20,8 @@ from sca.benchmark_protocols.e2e_intent_runner import (
     run_skill_loop_intent_benchmark,
 )
 from sca.benchmark_protocols.intent_prompts import build_intent_prompt_manifest
+from sca.benchmark_protocols.literature_comparison import build_literature_comparison_report
+from sca.benchmark_protocols.sun import build_reference_manifest, run_sun_benchmark
 from sca.batch import evaluate_folder, evaluate_manifest, evaluate_many, evaluate_one
 from sca.evaluators.alignn import AlignnEvaluator, DEFAULT_ALIGNN_MODEL
 from sca.evaluators.novelty import load_reference_structures_with_stats
@@ -198,6 +200,81 @@ def run_full_skill_loop_intent_benchmark_cli(
     except Exception as exc:
         raise ClickException(str(exc)) from exc
     console.print(f"[green]Full intent benchmark completed[/green]; prompts={result['prompts']}")
+
+
+@app.command("run-sun-benchmark")
+def run_sun_benchmark_cli(
+    manifest: Path = typer.Option(..., "--manifest", exists=True, file_okay=True, dir_okay=False, readable=True),
+    out_dir: Path = typer.Option(..., "--out-dir"),
+    reference_folder: Path | None = typer.Option(None, "--reference-folder", exists=True, file_okay=False, dir_okay=True, readable=True),
+    reference_manifest: Path | None = typer.Option(None, "--reference-manifest", exists=True, file_okay=True, dir_okay=False, readable=True),
+    path_col: str = typer.Option("cif_path", "--path-col"),
+    reference_path_col: str = typer.Option("cif_path", "--reference-path-col"),
+    reference_id_col: str | None = typer.Option(None, "--reference-id-col"),
+    anonymous: bool = typer.Option(False, "--anonymous", help="Use anonymous StructureMatcher novelty matching."),
+) -> None:
+    """Run evaluation-only Stability, Uniqueness, Novelty benchmarking."""
+
+    try:
+        result = run_sun_benchmark(
+            manifest=manifest,
+            out_dir=out_dir,
+            reference_folder=reference_folder,
+            reference_manifest=reference_manifest,
+            path_col=path_col,
+            reference_path_col=reference_path_col,
+            reference_id_col=reference_id_col,
+            anonymous=anonymous,
+        )
+    except Exception as exc:
+        raise ClickException(str(exc)) from exc
+    console.print(
+        f"[green]Wrote S.U.N. benchmark outputs[/green] "
+        f"({result['rows']} rows) to {result['results_csv']}"
+    )
+
+
+@app.command("build-literature-comparison-report")
+def build_literature_comparison_report_cli(
+    run_root: Path = typer.Option(..., "--run-root", exists=True, file_okay=False, dir_okay=True, readable=True),
+    comparators: Path = typer.Option(..., "--comparators", exists=True, file_okay=True, dir_okay=False, readable=True),
+    out_markdown: Path = typer.Option(..., "--out-markdown", help="Output Markdown report."),
+    out_json: Path = typer.Option(..., "--out-json", help="Output JSON report."),
+) -> None:
+    """Build a literature-aware comparison report for a completed intent run."""
+
+    try:
+        result = build_literature_comparison_report(
+            run_root=run_root,
+            comparators=comparators,
+            out_markdown=out_markdown,
+            out_json=out_json,
+        )
+    except Exception as exc:
+        raise ClickException(str(exc)) from exc
+    console.print(
+        f"[green]Wrote literature comparison report[/green] "
+        f"with {result['comparators']} comparator rows to {result['markdown']}"
+    )
+
+
+@app.command("build-reference-manifest")
+def build_reference_manifest_cli(
+    cif_dir: Path = typer.Option(..., "--cif-dir", exists=True, file_okay=False, dir_okay=True, readable=True),
+    out: Path = typer.Option(..., "--out"),
+    reference_set_name: str = typer.Option(..., "--reference-set-name"),
+) -> None:
+    """Build an evaluation-only reference manifest from a CIF folder."""
+
+    try:
+        result = build_reference_manifest(
+            cif_dir=cif_dir,
+            out=out,
+            reference_set_name=reference_set_name,
+        )
+    except Exception as exc:
+        raise ClickException(str(exc)) from exc
+    console.print(f"[green]Wrote {result['rows']} reference rows[/green] to {result['out']}")
 
 
 @app.command("benchmark-cif-set")

@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations  # ← must be here (first statement)
 
-import argparse, os, sys, time, io
+import argparse
+import io
+import os
+import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
