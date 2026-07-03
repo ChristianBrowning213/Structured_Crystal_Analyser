@@ -43,6 +43,8 @@ def test_literature_comparison_cli_writes_json_and_markdown_with_missing_sun(tmp
     assert data["headline_metrics"]["bad_contact_rate"]["value"] == 0.5
     assert data["headline_metrics"]["novelty"]["display"] == "not_checked/not_computable"
     assert data["headline_metrics"]["stability"]["display"] == "not_computable"
+    assert data["symmetry_intent_summary"]["space_group_exact_match_rate"]["value"] == 0.25
+    assert data["symmetry_intent_summary"]["mean_symmetry_score"]["value"] == 0.5
     assert len(data["comparator_groups"]["needs_manual_check"]) == 1
     assert len(data["comparator_groups"]["not_comparable_without_reference_cifs"]) == 1
     assert len(data["comparator_groups"]["not_comparable_without_stability_hull_relaxation"]) == 1
@@ -51,6 +53,8 @@ def test_literature_comparison_cli_writes_json_and_markdown_with_missing_sun(tmp
     text = markdown.read_text(encoding="utf-8")
     assert "Needs Manual Check" in text
     assert "Unique / Verifiable CSP Summary" in text
+    assert "Symmetry Intent Benchmark Summary" in text
+    assert "CrysText Contextual Symmetry Anchors" in text
     assert "Rows in this section are cautions only" in text
     assert "Our run is not an MP-20/MPTS-52 leaderboard run." in text
     assert "Do not claim wins over MP-20, Lang2Str, or CrysText" in text
@@ -63,6 +67,7 @@ def _fake_run_root(tmp_path: Path) -> Path:
     (run_root / "sca_direct_benchmark").mkdir()
     (run_root / "sca_intent_benchmark").mkdir()
     (run_root / "sca_unique_benchmark").mkdir()
+    (run_root / "symmetry_intent_benchmark").mkdir()
     (run_root / "reports" / "FULL_100_INTENT_BENCHMARK_SUMMARY.json").write_text(
         json.dumps(
             {
@@ -97,6 +102,17 @@ def _fake_run_root(tmp_path: Path) -> Path:
             },
         ]
     ).to_csv(run_root / "sca_intent_benchmark" / "intent_results.csv", index=False)
+    (run_root / "symmetry_intent_benchmark" / "symmetry_summary.json").write_text(
+        json.dumps(
+            {
+                "space_group_exact_match_rate": 0.25,
+                "crystal_system_match_rate": 0.75,
+                "family_symmetry_compatible_rate": 1.0,
+                "mean_symmetry_score": 0.5,
+            }
+        ),
+        encoding="utf-8",
+    )
     return run_root
 
 

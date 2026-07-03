@@ -22,6 +22,7 @@ from sca.benchmark_protocols.e2e_intent_runner import (
 from sca.benchmark_protocols.intent_prompts import build_intent_prompt_manifest
 from sca.benchmark_protocols.literature_comparison import build_literature_comparison_report
 from sca.benchmark_protocols.sun import build_reference_manifest, run_sun_benchmark
+from sca.benchmark_protocols.symmetry_intent import run_symmetry_intent_benchmark
 from sca.batch import evaluate_folder, evaluate_manifest, evaluate_many, evaluate_one
 from sca.evaluators.alignn import AlignnEvaluator, DEFAULT_ALIGNN_MODEL
 from sca.evaluators.novelty import load_reference_structures_with_stats
@@ -255,6 +256,32 @@ def build_literature_comparison_report_cli(
     console.print(
         f"[green]Wrote literature comparison report[/green] "
         f"with {result['comparators']} comparator rows to {result['markdown']}"
+    )
+
+
+@app.command("run-symmetry-intent-benchmark")
+def run_symmetry_intent_benchmark_cli(
+    manifest: Path = typer.Option(..., "--manifest", exists=True, file_okay=True, dir_okay=False, readable=True),
+    out_dir: Path = typer.Option(..., "--out-dir"),
+    symprec: str = typer.Option("0.01", "--symprec", help="One value or comma-separated values, e.g. 0.001,0.01,0.1."),
+    angle_tolerance: float = typer.Option(5.0, "--angle-tolerance"),
+    path_col: str = typer.Option("cif_path", "--path-col"),
+) -> None:
+    """Run dedicated space-group/crystal-system intent checks."""
+
+    try:
+        result = run_symmetry_intent_benchmark(
+            manifest=manifest,
+            out_dir=out_dir,
+            symprec=symprec,
+            angle_tolerance=angle_tolerance,
+            path_col=path_col,
+        )
+    except Exception as exc:
+        raise ClickException(str(exc)) from exc
+    console.print(
+        f"[green]Wrote symmetry intent benchmark outputs[/green] "
+        f"({result['rows']} rows) to {result['results_csv']}"
     )
 
 

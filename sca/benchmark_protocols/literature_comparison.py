@@ -37,11 +37,14 @@ def build_literature_comparison_report(
     comparator_rows = _read_comparators(Path(comparators))
     headline_metrics = collect_headline_metrics(root)
     unique_summary = collect_unique_verifiable_summary(root)
+    symmetry_summary = collect_symmetry_intent_summary(root)
     grouped = group_comparators(comparator_rows)
     report = {
         "run_root": str(root),
         "headline_metrics": headline_metrics,
         "unique_verifiable_csp_summary": unique_summary,
+        "symmetry_intent_summary": symmetry_summary,
+        "symmetry_contextual_comparators": _symmetry_contextual_comparators(comparator_rows),
         "comparator_counts": {name: len(rows) for name, rows in grouped.items()},
         "comparator_groups": grouped,
         "interpretation": _interpretation_rows(),
@@ -137,6 +140,27 @@ def collect_unique_verifiable_summary(run_root: str | Path) -> dict[str, dict[st
     return metrics
 
 
+def collect_symmetry_intent_summary(run_root: str | Path) -> dict[str, dict[str, Any]]:
+    """Collect dedicated symmetry intent metrics when available."""
+
+    root = Path(run_root)
+    data = _read_json(root / "symmetry_intent_benchmark" / "symmetry_summary.json")
+    metric_units = {
+        "space_group_exact_match_rate": "rate",
+        "crystal_system_match_rate": "rate",
+        "family_symmetry_compatible_rate": "rate",
+        "mean_symmetry_score": "score",
+    }
+    metrics = {
+        name: _metric(_number_or_none(data.get(name)), unit, "higher_is_better", "symmetry intent summary")
+        for name, unit in metric_units.items()
+    }
+    if not data:
+        for metric in metrics.values():
+            metric["source"] = "missing symmetry intent summary"
+    return metrics
+
+
 def group_comparators(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     groups: dict[str, list[dict[str, Any]]] = {
         "direct_contextual_anchors": [],
@@ -185,6 +209,24 @@ def render_literature_comparison_markdown(report: dict[str, Any]) -> str:
             }
         )
     lines.extend(_markdown_table(unique_rows, ["metric", "value", "status", "source"]))
+    lines.extend(["", "## Symmetry Intent Benchmark Summary", ""])
+    symmetry_rows = []
+    for name, metric in report.get("symmetry_intent_summary", {}).items():
+        symmetry_rows.append(
+            {
+                "metric": name,
+                "value": metric.get("display", _fmt(metric.get("value"))),
+                "status": metric.get("status"),
+                "source": metric.get("source"),
+            }
+        )
+    lines.extend(_markdown_table(symmetry_rows, ["metric", "value", "status", "source"]))
+    lines.extend(["", "### CrysText Contextual Symmetry Anchors", ""])
+    anchors = [_comparator_markdown_row(row) for row in report.get("symmetry_contextual_comparators", [])]
+    if anchors:
+        lines.extend(_markdown_table(anchors, ["paper", "system", "scope", "metric", "value", "status", "source", "reason"]))
+    else:
+        lines.append("No CrysText space-group contextual rows were available.")
     lines.extend(["", "## Interpretation", ""])
     for row in report["interpretation"]:
         lines.append(f"- {row}")
@@ -242,6 +284,7 @@ def _input_status(root: Path, comparators: Path) -> dict[str, Any]:
         "sun_summary_v2": root / "sun_benchmark_v2" / "sun_summary.json",
         "sun_summary": root / "sun_benchmark" / "sun_summary.json",
         "unique_summary": root / "sca_unique_benchmark" / "unique_summary.json",
+        "symmetry_summary": root / "symmetry_intent_benchmark" / "symmetry_summary.json",
         "comparators": comparators,
     }
     return {name: {"path": str(path), "exists": path.exists()} for name, path in paths.items()}
@@ -257,6 +300,16 @@ def _comparator_group(row: dict[str, Any]) -> str:
     if str(row.get("comparability_to_our_100_prompt_run") or "") == "not_comparable":
         return "not_comparable_without_reference_cifs"
     return "direct_contextual_anchors"
+
+
+def _symmetry_contextual_comparators(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    wanted = {"space_group_match_rate", "composition_and_sg_match_rate", "composition_match_rate"}
+    return [
+        row
+        for row in rows
+        if str(row.get("paper_name") or "").lower().startswith("crystext")
+        and str(row.get("metric_name_normalized") or "") in wanted
+    ]
 
 
 def _comparator_markdown_row(row: dict[str, Any]) -> dict[str, Any]:

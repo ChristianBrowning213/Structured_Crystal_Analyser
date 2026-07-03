@@ -53,11 +53,13 @@ Current 100-prompt values:
 - `bad_contact_rate = 0.10`
 - `intent_satisfaction_score_mean = 0.81`
 - `global uniqueness = 10/100`, with `10/10` target families represented
+- Dedicated symmetry-intent benchmark: `space_group_exact_match_rate = 0.00`, `crystal_system_match_rate = 0.00`, `family_symmetry_compatible_rate = 0.00`, `mean_symmetry_score = 0.00`
 - `stability and novelty = pending`
 
 Most direct contextual anchors:
 
 - CrysText and CrysText-RL are the closest in spirit for composition and space-group instruction following, but their prompt distribution and exact scoring protocol differ.
+- Our dedicated space-group/symmetry benchmark is now measured and currently fails under the SCA symmetry-intent protocol; this should be presented as a method-development target, not as a direct CrysText comparison.
 - Chemeleon validity/no-overlap is conceptually close to our `pre_dft_validity_rate`, though Chemeleon samples 20 structures per test prompt and uses its own structural validity filters.
 - Lang2Str, CrysText MP-20 CSP, CrystaLLM benchmark, and CDVAE coverage rows require reference datasets and paper-specific evaluation protocols, so they should not be presented as direct wins/losses for the 100-prompt run.
 - Stability comparators remain pending for us until generated structures are evaluated against a comparable MLIP or DFT hull workflow.
