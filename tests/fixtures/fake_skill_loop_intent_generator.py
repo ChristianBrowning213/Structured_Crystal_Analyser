@@ -64,6 +64,7 @@ def main() -> None:
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--seed", required=True)
     parser.add_argument("--manifest-row")
+    parser.add_argument("--task-spec")
     args = parser.parse_args()
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

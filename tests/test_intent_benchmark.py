@@ -87,6 +87,42 @@ def test_run_skill_loop_intent_benchmark_with_fake_generator(tmp_path: Path) -> 
     assert set(adversarial["status"]) == {"infeasible_or_invalid"}
 
 
+def test_skill_loop_intent_benchmark_writes_structured_task_spec(tmp_path: Path) -> None:
+    prompts = _write_100_prompt_manifest(tmp_path)
+    out_root = tmp_path / "run"
+    script = FIXTURES / "fake_skill_loop_intent_generator.py"
+    command = f"{sys.executable} {script} --prompt {{prompt}} --out-dir {{out_dir}} --seed {{seed}} --task-spec {{task_spec_json}}"
+
+    result = runner.invoke(
+        app,
+        [
+            "run-skill-loop-intent-benchmark",
+            "--prompts",
+            str(prompts),
+            "--skill-loop-command",
+            command,
+            "--out-root",
+            str(out_root),
+            "--seed",
+            "20260626",
+            "--num-attempts",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    task_spec_path = out_root / "skill_loop_raw_runs" / "run_001" / "task_spec.json"
+    task_spec = json.loads(task_spec_path.read_text(encoding="utf-8"))
+    assert task_spec["symmetry_request"]["space_group"] == "Pm-3m or subgroup"
+    assert task_spec["symmetry_request"]["hardness"] == "hard"
+    assert task_spec["target_crystal_system"] == "cubic/tetragonal"
+    assert task_spec["target_structure_family"] == "perovskite"
+    log = pd.read_csv(out_root / "logs" / "generation_log.csv")
+    command_text = log.loc[log["run_index"] == 1, "command"].iloc[0]
+    assert "task_spec.json" in command_text
+    assert "run_001" in command_text
+
+
 def test_intent_satisfaction_positive_and_negative(tmp_path: Path) -> None:
     cif = tmp_path / "candidate.cif"
     cif.write_text((FIXTURES / "tiny_valid.cif").read_text(encoding="utf-8"), encoding="utf-8")

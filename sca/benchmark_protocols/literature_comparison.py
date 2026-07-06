@@ -38,12 +38,14 @@ def build_literature_comparison_report(
     headline_metrics = collect_headline_metrics(root)
     unique_summary = collect_unique_verifiable_summary(root)
     symmetry_summary = collect_symmetry_intent_summary(root)
+    mlip_summary = collect_mlip_surrogate_summary(root)
     grouped = group_comparators(comparator_rows)
     report = {
         "run_root": str(root),
         "headline_metrics": headline_metrics,
         "unique_verifiable_csp_summary": unique_summary,
         "symmetry_intent_summary": symmetry_summary,
+        "mlip_surrogate_summary": mlip_summary,
         "symmetry_contextual_comparators": _symmetry_contextual_comparators(comparator_rows),
         "comparator_counts": {name: len(rows) for name, rows in grouped.items()},
         "comparator_groups": grouped,
@@ -161,6 +163,37 @@ def collect_symmetry_intent_summary(run_root: str | Path) -> dict[str, dict[str,
     return metrics
 
 
+def collect_mlip_surrogate_summary(run_root: str | Path) -> dict[str, dict[str, Any]]:
+    """Collect CHGNet static/relaxation summaries when available."""
+
+    root = Path(run_root)
+    static = _read_json(root / "stability_chgnet_static" / "chgnet_static_summary.json")
+    relax = _read_json(root / "stability_chgnet_relax" / "chgnet_relax_summary.json")
+    static_energy = static.get("chgnet_energy_per_atom") or {}
+    static_force = static.get("max_force_ev_per_angstrom") or {}
+    relax_before = relax.get("max_force_before") or {}
+    relax_after = relax.get("max_force_after") or {}
+    return {
+        "chgnet_static_ok_rate": _metric(_number_or_none(static.get("chgnet_ok_rate")), "rate", "higher_is_better", _source(static, "CHGNet static summary")),
+        "median_chgnet_energy_per_atom": _metric(_number_or_none(static_energy.get("median")), "eV/atom", "contextual", _source(static, "CHGNet static summary")),
+        "median_chgnet_max_force": _metric(_number_or_none(static_force.get("median")), "eV/A", "lower_is_better", _source(static, "CHGNet static summary")),
+        "mean_chgnet_max_force": _metric(_number_or_none(static_force.get("mean")), "eV/A", "lower_is_better", _source(static, "CHGNet static summary")),
+        "max_chgnet_max_force": _metric(_number_or_none(static_force.get("max")), "eV/A", "lower_is_better", _source(static, "CHGNet static summary")),
+        "chgnet_relax_ok_rate": _metric(_number_or_none(relax.get("relax_ok_rate")), "rate", "higher_is_better", _source(relax, "CHGNet relaxation summary")),
+        "relax_force_before_median": _metric(_number_or_none(relax_before.get("median")), "eV/A", "lower_is_better", _source(relax, "CHGNet relaxation summary")),
+        "relax_force_after_median": _metric(_number_or_none(relax_after.get("median")), "eV/A", "lower_is_better", _source(relax, "CHGNet relaxation summary")),
+        "relax_status": {
+            "value": None,
+            "display": str(relax.get("status") or "unavailable"),
+            "unit": None,
+            "direction": "contextual",
+            "status": str(relax.get("status") or "unavailable"),
+            "source": _source(relax, "CHGNet relaxation summary"),
+            "reason": "MLIP relaxation diagnostic only; not DFT and not an energy-above-hull claim.",
+        },
+    }
+
+
 def group_comparators(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     groups: dict[str, list[dict[str, Any]]] = {
         "direct_contextual_anchors": [],
@@ -227,6 +260,25 @@ def render_literature_comparison_markdown(report: dict[str, Any]) -> str:
         lines.extend(_markdown_table(anchors, ["paper", "system", "scope", "metric", "value", "status", "source", "reason"]))
     else:
         lines.append("No CrysText space-group contextual rows were available.")
+    lines.extend(["", "## CHGNet MLIP Surrogate Summary", ""])
+    mlip_rows = []
+    for name, metric in report.get("mlip_surrogate_summary", {}).items():
+        mlip_rows.append(
+            {
+                "metric": name,
+                "value": metric.get("display", _fmt(metric.get("value"))),
+                "status": metric.get("status"),
+                "source": metric.get("source"),
+                "note": metric.get("reason", ""),
+            }
+        )
+    lines.extend(_markdown_table(mlip_rows, ["metric", "value", "status", "source", "note"]))
+    lines.extend(
+        [
+            "",
+            "CHGNet static and relaxation values are surrogate MLIP pre-DFT diagnostics. They are not DFT energies, energy-above-hull values, or thermodynamic stability claims.",
+        ]
+    )
     lines.extend(["", "## Interpretation", ""])
     for row in report["interpretation"]:
         lines.append(f"- {row}")
@@ -285,6 +337,8 @@ def _input_status(root: Path, comparators: Path) -> dict[str, Any]:
         "sun_summary": root / "sun_benchmark" / "sun_summary.json",
         "unique_summary": root / "sca_unique_benchmark" / "unique_summary.json",
         "symmetry_summary": root / "symmetry_intent_benchmark" / "symmetry_summary.json",
+        "chgnet_static_summary": root / "stability_chgnet_static" / "chgnet_static_summary.json",
+        "chgnet_relax_summary": root / "stability_chgnet_relax" / "chgnet_relax_summary.json",
         "comparators": comparators,
     }
     return {name: {"path": str(path), "exists": path.exists()} for name, path in paths.items()}
@@ -493,6 +547,10 @@ def _metric(value: float | None, unit: str | None, direction: str, source: str) 
         "status": "ok" if value is not None else "unavailable",
         "source": source,
     }
+
+
+def _source(data: dict[str, Any], present_name: str) -> str:
+    return present_name if data else f"missing {present_name.lower()}"
 
 
 def _unavailable(reason: str) -> dict[str, Any]:

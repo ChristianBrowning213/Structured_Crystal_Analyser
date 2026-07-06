@@ -10,8 +10,18 @@ Key source artifacts:
 - `sun_benchmark_v2/sun_summary.json`
 - `symmetry_intent_benchmark/symmetry_summary.json`
 - `symmetry_intent_benchmark/symmetry_report.md`
-- `reports/LITERATURE_COMPARISON_REPORT_v3.md`
-- `reports/LITERATURE_COMPARISON_REPORT_v3.json`
+- `symmetry_intent_benchmark/SYMMETRY_FAILURE_DIAGNOSIS.md`
+- `symmetry_intent_benchmark/QLIP_SYMMETRY_INPUT_DIAGNOSIS.md`
+- `symmetry_intent_benchmark_sensitivity/SYMMETRY_SENSITIVITY_SUMMARY.md`
+- `../symmetry_wiring_prototype_scaffold_smoke_20260704/SMOKE_TEST_REPORT.md`
+- `stability_chgnet_static/STABILITY_CHGNET_STATIC_REPORT.md`
+- `stability_chgnet_static/chgnet_static_summary.json`
+- `stability_chgnet_relax/STABILITY_CHGNET_RELAX_REPORT.md`
+- `stability_chgnet_relax/chgnet_relax_summary.json`
+- `sun_benchmark_with_reference/NOVELTY_PENDING.md`
+- `traceability_gap_analysis.md`
+- `reports/LITERATURE_COMPARISON_REPORT_v4.md`
+- `reports/LITERATURE_COMPARISON_REPORT_v4.json`
 - `docs/paper_comparator_evidence.md`
 - `data/paper_comparators/crystal_generation_comparators.csv`
 
@@ -21,7 +31,9 @@ The current 100-prompt guided SPP run shows strong basic generation control and 
 
 The new dedicated symmetry-intent benchmark sharpens the interpretation. Although formula and coarse family control are strong, the generated CIFs do not currently satisfy requested space-group, crystal-system, or family-compatible symmetry constraints under the dedicated `SpacegroupAnalyzer` pass at `symprec=0.01` and `angle_tolerance=5`. All 100 CIFs are parseable, but the space-group exact match rate, crystal-system match rate, family symmetry-compatible rate, and mean symmetry score are all 0.000.
 
-This means the current system is best described as formula- and geometry-guided text-to-CSP with traceable execution, not yet symmetry-constrained CSP. That is a useful benchmark discovery: it turns symmetry control from an assumed property into a measured failure mode and a clear next technical contribution.
+CHGNet static energy/force is now computable for all 100 generated CIFs as a surrogate MLIP pre-DFT screen. The median static CHGNet energy is approximately -0.924 eV/atom, but the median max force is 7.187 eV/A and the mean max force is 12.015 eV/A, with a maximum of 38.826 eV/A. Those force values reinforce the geometry diagnosis: several candidates are not relaxation-ready without repair or stronger construction constraints. A 10-representative CHGNet relaxation pass was attempted, but CHGNet is unavailable in the current active Python environment, so no relaxation claims are made.
+
+This means the current system is best described as formula- and geometry-guided text-to-CSP with traceable execution, not yet symmetry-constrained or stability-validated CSP. That is a useful benchmark discovery: it turns symmetry control and relaxation readiness from assumed properties into measured method-development targets.
 
 ## Benchmark Scope
 
@@ -61,6 +73,12 @@ The 10 target families are:
 | Traceability | `traceable_constraint_grounded_csp_score` | 0.253 | Partial traceable-CSP evidence exists, but constraint/solver/certificate fields are incomplete. |
 | Traceability | `audit_bundle_score` | 0.528 | Audit artifacts are present enough to inspect, but not yet complete. |
 | Literature comparison | comparator evidence rows | 37 rows | Used for contextual comparison only, with 4 rows marked `needs_manual_check`. |
+| CHGNet static | `chgnet_ok_rate` | 1.000 | Static CHGNet proxy ran on all 100 CIFs in the existing static artifact. |
+| CHGNet static | median energy per atom | -0.924 eV/atom | Surrogate MLIP diagnostic only, not DFT stability or hull energy. |
+| CHGNet static | median max force | 7.187 eV/A | High enough to indicate relaxation-readiness issues. |
+| CHGNet static | max force | 38.826 eV/A | Severe high-force outliers are present. |
+| CHGNet relax | unique representatives | 10 | One representative per target formula/family was selected. |
+| CHGNet relax | status | unavailable | Relaxation did not run in this environment because CHGNet is unavailable to the active Python environment. |
 | Symmetry intent | `declared_p1_rate` | 1.000 | All CIFs declare P1, likely partly reflecting export behavior. |
 | Symmetry intent | `analyzed_p1_rate` | 0.500 | Half analyze as P1 even after symmetry detection. |
 | Symmetry intent | `space_group_exact_match_rate` | 0.000 | No generated CIF matches its requested analyzed space group. |
@@ -74,6 +92,42 @@ The 10 target families are:
 The direct quality screen is strong at the basic structural-file level. All 100 CIFs parse, and formula/composition satisfaction is 1.000. This is a meaningful result: the system can produce syntactically usable CIFs with the requested chemical formula across a broad, deliberately varied prompt set.
 
 The pre-DFT validity rate is 0.900, with a bad-contact rate of 0.100. That means the workflow is not merely writing valid text files; most structures also pass the current geometry/contact checks. The remaining 10% are concrete repair targets for geometry cleanup, local relaxation, or stricter rejection before final output.
+
+## CHGNet Static Proxy
+
+The CHGNet static pass produced records for 100/100 generated CIFs in `stability_chgnet_static/chgnet_static_results.csv`. The report in `stability_chgnet_static/STABILITY_CHGNET_STATIC_REPORT.md` summarizes this as an MLIP surrogate pre-DFT screen.
+
+Key values:
+
+| Metric | Value |
+| --- | ---: |
+| total rows | 100 |
+| `chgnet_ok_rate` | 1.000 |
+| median CHGNet energy per atom | -0.924 eV/atom |
+| mean CHGNet energy per atom | -1.103 eV/atom |
+| min / max CHGNet energy per atom | -3.381 / 1.047 eV/atom |
+| median max force | 7.187 eV/A |
+| mean max force | 12.015 eV/A |
+| max force | 38.826 eV/A |
+
+High-force families are flagged in the static report. The clearest examples are BaTiO3, CsPbBr3, and Li6PS5Cl, with Li6PS5Cl also carrying the bad-contact/pre-DFT-validity failure pattern. These are not DFT stability results. They are useful because they show which formula/family representatives are geometrically strained under a learned interatomic potential before any expensive first-principles workflow.
+
+CHGNet static energy/force is a surrogate pre-DFT screen and not a DFT stability or energy-above-hull claim.
+
+## CHGNet Relaxation
+
+A unique-representative manifest was built at `stability_chgnet_relax/unique_representatives_manifest.csv` with 10 rows, one per target formula/family. The manifest preserves CIF path, formula, family, prompt ID, method, run index, attempt ID, and existing static diagnostic fields. It also includes `target_cif_path = cif_path` so the existing relaxation evaluator can report before/after self-match diagnostics without treating the input as an external ground truth.
+
+The requested relaxation command wrote `stability_chgnet_relax/chgnet_relax_unique_results.csv` and `.jsonl`, but every row was skipped because CHGNet is unavailable in the current active Python environment. The relaxation summary is therefore:
+
+| Metric | Value |
+| --- | ---: |
+| representatives | 10 |
+| relax ok count | 0 |
+| relax ok rate | 0.000 |
+| status | unavailable |
+
+The report in `stability_chgnet_relax/STABILITY_CHGNET_RELAX_REPORT.md` records the failure explicitly. No relaxed-force, energy-drop, convergence, or relaxed-CIF claims are inferred from the static results.
 
 ## Intent-Following
 
@@ -109,6 +163,12 @@ All CIFs declare P1. That may partly be a CIF export or writing convention rathe
 
 This is a real method-development signal. The current system is formula- and geometry-guided CSP, not yet symmetry-constrained CSP. It can produce plausible formula-controlled structures, but it is not yet constructing structures on the requested space-group/prototype manifold.
 
+The diagnostic report `symmetry_intent_benchmark/SYMMETRY_FAILURE_DIAGNOSIS.md` separates two issues. First, all CIFs declare P1, which is partly an export/declaration issue. Second, the analyzed geometries still fail the requested symmetry checks: half analyze as P1 and all miss the target symmetry criteria. The sensitivity report `symmetry_intent_benchmark_sensitivity/SYMMETRY_SENSITIVITY_SUMMARY.md` shows the failure is robust across `symprec = 0.001, 0.01, 0.1`; exact SG, crystal-system, and family-compatible rates remain zero.
+
+Symmetry diagnosis indicates whether target symmetry is currently metadata-only, request-only, weak template-only, active constraint bug, or export loss.
+
+A later 3-case wiring/prototype-scaffold smoke test is recorded at `local_runs/symmetry_wiring_prototype_scaffold_smoke_20260704`. It moves BaTiO3, NiO, and CeO2 symmetry metadata into structured Skill-Loop-CSP task specs, QLIP `problem.symmetry` / `problem.prototype`, `symmetry_trace.json`, and `prototype_scaffold` candidate-site mode. It is not a replacement for the full benchmark and does not claim symmetry enforcement: SCA symmetry checks on the three smoke outputs still report zero exact space-group, crystal-system, and family-compatible matches.
+
 ## S.U.N.
 
 The S.U.N. evaluation finds 10 unique structures among 100 generated CIFs, for a global uniqueness rate of 0.100. That should be interpreted alongside target-family coverage: all 10 target families are represented. The result is not a collapse into one universal structure across all prompts. It is better understood as repeated or highly similar outputs within each target family.
@@ -120,9 +180,11 @@ Stability and novelty remain pending:
 
 This keeps the S.U.N. result honest: uniqueness is measured, but stable-and-novel discovery is not yet claimed.
 
+No expected reference manifest was found under `reference_sets/crystal_db_snapshot/metadata.csv`, `reference_sets/mp20/metadata.csv`, or `reference_sets/materials_project_snapshot/metadata.csv`. The pending instructions are written to `sun_benchmark_with_reference/NOVELTY_PENDING.md`. Reference sets should be used only for evaluation-only novelty checking unless explicitly testing retrieval contamination.
+
 ## Literature Comparison
 
-The literature comparison uses the sourced evidence table in `data/paper_comparators/crystal_generation_comparators.csv` and the rendered report in `reports/LITERATURE_COMPARISON_REPORT_v3.md`. It is comparison context, not a leaderboard claim.
+The literature comparison uses the sourced evidence table in `data/paper_comparators/crystal_generation_comparators.csv` and the rendered report in `reports/LITERATURE_COMPARISON_REPORT_v4.md`. It is comparison context, not a leaderboard claim. Version 4 includes the symmetry-intent summary and CHGNet MLIP surrogate summary.
 
 ### Contextual Anchors
 
@@ -156,9 +218,13 @@ The relevant dimensions are:
 
 Current traceability scores are partial: `traceable_constraint_grounded_csp_score = 0.253` and `audit_bundle_score = 0.528`. This is enough to make failures inspectable, but not enough to claim complete traceable CSP execution.
 
+The traceability gap report is `traceability_gap_analysis.md`. The most common missing converted-bundle artifacts are `structured_intent`, `constraint_trace`, `validation_trace`, and `diagnostics_trace`, each missing across the converted run bundles. The next archive-writing step is to persist structured intent, retrieval traces, evidence records, SPP traces, constraint traces, solver request/result payloads, validation reports, final decisions, run configuration, and environment metadata as explicit files, including honest skipped/status files when a stage does not run.
+
 ## Limitations
 
 - No DFT stability evaluation has been run.
+- CHGNet static was run as a surrogate MLIP screen, but this is not DFT and not an energy-above-hull calculation.
+- CHGNet relaxation on 10 unique representatives was attempted but unavailable in the active environment; no relaxation convergence claim is made.
 - No exact MP-20 or MPTS-52 leaderboard protocol has been run.
 - No global novelty reference set has been supplied.
 - No symmetry-constrained generation has been achieved yet.

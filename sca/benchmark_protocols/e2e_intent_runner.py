@@ -82,6 +82,8 @@ GENERATED_CIF_MANIFEST_COLUMNS = [
     "notes",
 ]
 
+TASK_SPEC_SIDECAR_NAME = "task_spec.json"
+
 
 def ensure_run_layout(run_root: str | Path) -> dict[str, Path]:
     root = Path(run_root)
@@ -115,7 +117,9 @@ def run_skill_loop_intent_benchmark(
         manifest_row["num_attempts"] = str(num_attempts)
         (run_dir / "manifest_row.json").write_text(json.dumps(manifest_row, indent=2), encoding="utf-8")
         (run_dir / "prompt.txt").write_text(str(row["input_text"]), encoding="utf-8")
-        command = _format_command(skill_loop_command, row, run_dir, seed)
+        task_spec_path = run_dir / TASK_SPEC_SIDECAR_NAME
+        task_spec_path.write_text(json.dumps(_task_spec_payload_from_row(row), indent=2, sort_keys=True), encoding="utf-8")
+        command = _format_command(skill_loop_command, row, run_dir, seed, task_spec_path)
         stdout_path = run_dir / "stdout.txt"
         stderr_path = run_dir / "stderr.txt"
         started = time.perf_counter()
@@ -302,7 +306,7 @@ def _validate_prompt_frame(frame: pd.DataFrame, seed: int, *, require_100: bool)
         raise ValueError(f"Intent manifest seed must be fixed at {seed}; found {sorted(seeds)}")
 
 
-def _format_command(template: str, row: pd.Series, out_dir: Path, seed: int) -> str:
+def _format_command(template: str, row: pd.Series, out_dir: Path, seed: int, task_spec_path: Path | None = None) -> str:
     replacements = {
         "prompt": str(row["input_text"]),
         "prompt_id": str(row["prompt_id"]),
@@ -310,6 +314,10 @@ def _format_command(template: str, row: pd.Series, out_dir: Path, seed: int) -> 
         "seed": str(seed),
         "out_dir": str(out_dir),
         "target_formula": str(row["target_formula"]),
+        "target_space_group": str(row.get("target_space_group", "")),
+        "target_crystal_system": str(row.get("target_crystal_system", "")),
+        "target_structure_family": str(row.get("target_structure_family", "")),
+        "task_spec_json": str(task_spec_path or (out_dir / TASK_SPEC_SIDECAR_NAME)),
         "benchmark_mode": str(row["benchmark_mode"]),
     }
     command = template
@@ -321,6 +329,76 @@ def _format_command(template: str, row: pd.Series, out_dir: Path, seed: int) -> 
 def _quote(value: str) -> str:
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
+
+
+def _task_spec_payload_from_row(row: pd.Series) -> dict[str, Any]:
+    data = _series_to_dict(row)
+    constraints = _intent_constraints(data.get("intent_constraints_json"))
+    space_group = _first_text(
+        constraints.get("space_group"),
+        constraints.get("target_space_group"),
+        data.get("target_space_group"),
+    )
+    crystal_system = _first_text(
+        constraints.get("crystal_system"),
+        constraints.get("target_crystal_system"),
+        data.get("target_crystal_system"),
+    )
+    family = _first_text(
+        constraints.get("structure_family"),
+        constraints.get("target_structure_family"),
+        data.get("target_structure_family"),
+    )
+    motifs = constraints.get("required_motifs")
+    motif_prior = "; ".join(str(item) for item in motifs if str(item).strip()) if isinstance(motifs, list) else None
+    return {
+        "schema_version": "task_spec.v1",
+        "query_text": _first_text(data.get("input_text"), data.get("target_formula")) or "structured crystal task",
+        "composition_target": _first_text(constraints.get("formula"), data.get("target_formula")),
+        "composition_strictness": "fixed",
+        "symmetry_request": {
+            "space_group": space_group,
+            "hardness": "hard" if space_group else "none",
+        },
+        "target_space_group": space_group,
+        "target_space_group_number": _first_text(
+            constraints.get("space_group_number"),
+            constraints.get("target_space_group_number"),
+            data.get("target_space_group_number"),
+        ),
+        "target_crystal_system": crystal_system,
+        "target_structure_family": family,
+        "prototype": family,
+        "motif_prior": motif_prior,
+        "property_bias": None,
+        "qlip_objective": None,
+        "external_predictor_targets": [],
+        "solve_mode": "feasibility",
+        "retrieval_strictness": "prototype_tight" if family else "composition_tight",
+        "iteration_budget": 1,
+        "defaults_used": ["structured_intent_from_sca_manifest"],
+    }
+
+
+def _intent_constraints(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, str) or not raw.strip():
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _first_text(*values: Any) -> str | None:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if value is not None and not isinstance(value, str):
+            text = str(value).strip()
+            if text:
+                return text
+    return None
 
 
 def _series_to_dict(row: pd.Series) -> dict[str, Any]:
