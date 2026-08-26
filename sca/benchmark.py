@@ -144,8 +144,16 @@ def benchmark_manifest(
                 "reference_id": _optional_cell(row, reference_id_col, frame.columns)
                 or _optional_cell(row, "target_reference_id", frame.columns),
                 "structure_match_mode": structure_match_mode,
-                "spp_artifact": str(spp_artifact) if spp_artifact else None,
-                "hull_reference_path": str(hull_reference_path) if hull_reference_path else None,
+                "spp_artifact": _row_path_or_global(
+                    row, "spp_artifact", frame.columns, manifest_csv, spp_artifact
+                ),
+                "hull_reference_path": _row_path_or_global(
+                    row, "hull_reference_path", frame.columns, manifest_csv, hull_reference_path
+                ),
+                "traceable_bundle_dir": _optional_path_cell(
+                    row, "traceable_bundle_dir", frame.columns, manifest_csv
+                ),
+                "topology_policy": _optional_cell(row, "topology_policy", frame.columns),
                 "target_formation_energy_per_atom": _optional_float_cell(row, target_formation_energy_col, frame.columns),
                 "target_energy_above_hull": _optional_float_cell(row, target_energy_above_hull_col, frame.columns),
                 "target_band_gap": _optional_float_cell(row, target_band_gap_col, frame.columns),
@@ -360,6 +368,21 @@ def _optional_path_cell(row, column: str | None, columns, manifest_csv: str | Pa
     return str(resolve_manifest_path(value, manifest_csv))
 
 
+def _row_path_or_global(
+    row,
+    column: str,
+    columns,
+    manifest_csv: str | Path,
+    global_value: str | Path | None,
+) -> str | None:
+    """Resolve a row-specific artifact path, falling back to a CLI/global value."""
+
+    row_value = _optional_path_cell(row, column, columns, manifest_csv)
+    if row_value is not None:
+        return row_value
+    return str(global_value) if global_value else None
+
+
 def _add_item_context(flattened: dict, item: dict) -> None:
     flattened.setdefault("input_path", str(item["path"]))
     for key, value in (item.get("extra_context") or {}).items():
@@ -383,6 +406,9 @@ def _add_item_context(flattened: dict, item: dict) -> None:
         "target_property_name",
         "target_property_value",
         "hull_reference_path",
+        "spp_artifact",
+        "traceable_bundle_dir",
+        "topology_policy",
     ):
         value = item.get(key)
         if value is not None:

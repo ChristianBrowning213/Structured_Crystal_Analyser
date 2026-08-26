@@ -110,7 +110,7 @@ def score_structure_with_spp(
                 missing_pair_count += 1
                 pair_missing[key] += 1
                 continue
-            penalty, is_tail = _penalty_for_distance(distance, table.bin_edges, table.penalties, table.tail_penalty)
+            penalty, is_tail = _penalty_for_table(distance, table)
             weighted = penalty * table.weight
             total_score += weighted
             scored_pair_count += 1
@@ -160,6 +160,25 @@ def _penalty_for_distance(
     return float(tail_penalty if tail_penalty is not None else max(penalties)), True
 
 
+def _penalty_for_table(distance: float, table) -> tuple[float, bool]:
+    if table.distance_grid is None or table.interpolation_policy == "piecewise_constant":
+        return _penalty_for_distance(distance, table.bin_edges, table.penalties, table.tail_penalty)
+    if distance < table.distance_grid[0] or distance > table.distance_grid[-1]:
+        return float(table.tail_penalty if table.tail_penalty is not None else 0.0), True
+    if table.interpolation_policy not in {"linear", "cubic"}:
+        raise ValueError(f"Unsupported SPP interpolation policy '{table.interpolation_policy}'")
+    from scipy.interpolate import interp1d
+
+    interpolator = interp1d(
+        table.distance_grid,
+        table.penalties,
+        kind=table.interpolation_policy,
+        bounds_error=False,
+        fill_value=float(table.tail_penalty if table.tail_penalty is not None else 0.0),
+    )
+    return float(interpolator(distance)), False
+
+
 def _empty_metrics(error: str | None = None) -> dict:
     return {
         "spp_ok": False,
@@ -171,4 +190,3 @@ def _empty_metrics(error: str | None = None) -> dict:
         "worst_species_pair": None,
         "spp_error": error,
     }
-

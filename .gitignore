@@ -18,3 +18,4 @@ reference_sets/materials_project_snapshot/**
 reference_sets/crystal_db_snapshot/**
 !reference_sets/
 !reference_sets/README.md
+artifacts/

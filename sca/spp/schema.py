@@ -16,6 +16,8 @@ class SppPairTable(BaseModel):
     penalties: list[float] = Field(min_length=1)
     tail_penalty: float | None = None
     weight: float = 1.0
+    distance_grid: list[float] | None = None
+    interpolation_policy: str = "piecewise_constant"
 
     @model_validator(mode="after")
     def _check_lengths(self) -> "SppPairTable":
@@ -23,6 +25,11 @@ class SppPairTable(BaseModel):
             raise ValueError("penalties length must equal len(bin_edges) - 1")
         if sorted(self.bin_edges) != self.bin_edges:
             raise ValueError("bin_edges must be sorted ascending")
+        if self.distance_grid is not None:
+            if len(self.distance_grid) != len(self.penalties):
+                raise ValueError("distance_grid length must equal penalties length")
+            if sorted(self.distance_grid) != self.distance_grid:
+                raise ValueError("distance_grid must be sorted ascending")
         return self
 
 
@@ -74,4 +81,3 @@ def load_spp_artifact(path: str | Path) -> SppArtifact:
 
 def species_pair_key(species_a: str, species_b: str) -> str:
     return "--".join(sorted((species_a, species_b)))
-

@@ -62,6 +62,16 @@ _REGISTRY: dict[str, EvaluatorSpec] = {
         description="Standalone basic geometry checks.",
         factory_path="sca.evaluators.intent_satisfaction:GeometryBenchmarkEvaluator",
     ),
+    "local_environment": EvaluatorSpec(
+        name="local_environment",
+        description="Generic site coordination, polyhedra, and framework diagnostics.",
+        factory_path="sca.evaluators.topology:LocalEnvironmentBenchmarkEvaluator",
+    ),
+    "family_topology": EvaluatorSpec(
+        name="family_topology",
+        description="Policy-driven crystal-family topology validation.",
+        factory_path="sca.evaluators.topology:FamilyTopologyBenchmarkEvaluator",
+    ),
     "intent_satisfaction": EvaluatorSpec(
         name="intent_satisfaction",
         description="Deterministic prompt-intent satisfaction checks for generated CIFs.",
