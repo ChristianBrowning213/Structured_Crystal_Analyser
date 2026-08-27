@@ -65,8 +65,15 @@ def verify_optional_backends(functional: bool = False) -> list[dict[str, Any]]:
             notes.append(f"{model_env} does not point to an existing file")
         if pretrained_env and not pretrained_name and not model_path_exists:
             notes.append(f"{pretrained_env} is not set")
+        if missing_modules:
+            readiness_status = "SKIPPED_DEPENDENCY"
+        elif not model_ready:
+            readiness_status = "SKIPPED_MODEL"
+        else:
+            readiness_status = "READY"
         row = {
             "backend": name,
+            "status": readiness_status,
             "ready": ready,
             "modules": ",".join(modules),
             "missing_modules": ",".join(missing_modules),
@@ -87,6 +94,8 @@ def verify_optional_backends(functional: bool = False) -> list[dict[str, Any]]:
             row["functional_model"] = smoke.get("model")
             row["functional_energy_per_atom"] = smoke.get("energy_per_atom")
             row["ready"] = bool(ready and smoke.get("ok"))
+            if not smoke.get("ok"):
+                row["status"] = "FAILED_INITIALIZATION"
         elif functional:
             row["functional_ok"] = None
             row["functional_error_type"] = None

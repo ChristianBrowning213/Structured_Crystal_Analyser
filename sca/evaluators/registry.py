@@ -138,6 +138,16 @@ _REGISTRY: dict[str, EvaluatorSpec] = {
         description="Consensus and disagreement metrics across available MLIP energy columns.",
         factory_path="sca.evaluators.mlip:MlipEnsembleBenchmarkEvaluator",
     ),
+    "relaxation_intent_retention": EvaluatorSpec(
+        name="relaxation_intent_retention",
+        description="Generated-to-relaxed structural change and crystallographic intent retention.",
+        factory_path="sca.evaluators.relaxation_intent_retention:RelaxationIntentRetentionEvaluator",
+    ),
+    "post_dft_intent_retention": EvaluatorSpec(
+        name="post_dft_intent_retention",
+        description="Generated-to-DFT-relaxed structural and intent retention.",
+        factory_path="sca.dft.analysis.transition:PostDftIntentRetentionEvaluator",
+    ),
     "property_targets": EvaluatorSpec(
         name="property_targets",
         description="Compare predicted benchmark properties against manifest target values.",

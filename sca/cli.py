@@ -11,6 +11,7 @@ from click import ClickException
 from rich.console import Console
 
 from sca.backends import verify_optional_backends
+from sca.advanced_analysis import analyse_crystal_advanced, write_advanced_report
 from sca.benchmark import benchmark_folder, benchmark_manifest, benchmark_one
 from sca.benchmark_protocols.direct import protocol_rows_with_computability, run_direct_cif_benchmark
 from sca.benchmark_protocols.e2e import run_e2e_text_benchmark
@@ -27,6 +28,16 @@ from sca.batch import evaluate_folder, evaluate_manifest, evaluate_many, evaluat
 from sca.evaluators.alignn import AlignnEvaluator, DEFAULT_ALIGNN_MODEL
 from sca.evaluators.novelty import load_reference_structures_with_stats
 from sca.evaluators.registry import get_evaluator_spec, list_evaluator_specs
+from sca.dft.backends import get_backend
+from sca.dft.io import write_json as write_dft_json
+from sca.dft.workflow import collect_results, prepare_manifest, status_prepared, submit_prepared
+from sca.electronic_stack import (
+    build_raw_baseline,
+    run_chgnet_relaxation_campaign,
+    run_static_campaign,
+    validate_paper_manifest,
+    write_backend_readiness,
+)
 from sca.io import discover_cif_files, load_manifest, write_csv, write_jsonl, write_single_json, write_summary_csv
 from sca.paper_benchmarks.diagnostics import (
     build_paper_target_diagnostics,
@@ -51,9 +62,11 @@ app = typer.Typer(help="Structured Crystal Analyser.")
 crystallm_app = typer.Typer(help="CrystaLLM-style pre-DFT crystal evaluation.")
 alignn_app = typer.Typer(help="ALIGNN-based crystal structure evaluation.")
 benchmark_app = typer.Typer(help="Modular generated-crystal benchmarking.")
+dft_app = typer.Typer(help="Prepare, submit, track, and collect external DFT calculations.")
 app.add_typer(crystallm_app, name="crystallm-eval")
 app.add_typer(alignn_app, name="alignn")
 app.add_typer(benchmark_app, name="benchmark")
+app.add_typer(dft_app, name="dft")
 console = Console()
 
 
@@ -99,10 +112,162 @@ def list_evaluators() -> None:
 
 
 @app.command("verify-backends")
-def verify_backends(functional: bool = typer.Option(False, "--functional", help="Run tiny functional smoke checks where available.")) -> None:
+def verify_backends(
+    functional: bool = typer.Option(False, "--functional", help="Run tiny functional smoke checks where available."),
+    csv_out: Path | None = typer.Option(None, "--csv", help="Optional CSV output path."),
+    json_out: Path | None = typer.Option(None, "--json", help="Optional JSON output path."),
+    markdown: Path | None = typer.Option(None, "--markdown", help="Optional Markdown output path."),
+) -> None:
     """Check optional benchmark backend imports and local model configuration."""
 
-    console.print_json(data=verify_optional_backends(functional=functional))
+    rows = verify_optional_backends(functional=functional)
+    if csv_out:
+        csv_out.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_csv(csv_out, index=False)
+    if json_out:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(json.dumps({"rows": rows}, indent=2) + "\n", encoding="utf-8")
+    if markdown:
+        markdown.parent.mkdir(parents=True, exist_ok=True)
+        markdown.write_text("# MLIP backend readiness\n\n" + pd.DataFrame(rows).to_markdown(index=False) + "\n", encoding="utf-8")
+    console.print_json(data=rows)
+
+
+@app.command("validate-paper16-manifest")
+def validate_paper16_manifest_cli(
+    manifest: Path = typer.Option(
+        Path("benchmarks/paper_advanced_validation/PAPER_16_MANIFEST.csv"),
+        "--manifest",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+    ),
+) -> None:
+    """Validate the immutable paper-16 paths, hashes, roster, and intent provenance."""
+
+    result = validate_paper_manifest(manifest)
+    console.print_json(data=result)
+    if not result["valid"]:
+        raise typer.Exit(1)
+
+
+@app.command("build-paper16-baseline")
+def build_paper16_baseline_cli(
+    manifest: Path = typer.Option(
+        Path("benchmarks/paper_advanced_validation/PAPER_16_MANIFEST.csv"), "--manifest"
+    ),
+    out_dir: Path = typer.Option(Path("artifacts/electronic_stack/paper16"), "--out-dir"),
+) -> None:
+    """Build the immutable raw paper-16 baseline and MLIP readiness files."""
+
+    rows = build_raw_baseline(manifest, out_dir)
+    write_backend_readiness(out_dir)
+    console.print(f"[green]Wrote {len(rows)} raw paper baseline rows[/green] to {out_dir}")
+
+
+@app.command("run-paper16-mlip")
+def run_paper16_mlip_cli(
+    manifest: Path = typer.Option(
+        Path("benchmarks/paper_advanced_validation/PAPER_16_MANIFEST.csv"), "--manifest"
+    ),
+    out_dir: Path = typer.Option(Path("artifacts/electronic_stack/paper16"), "--out-dir"),
+    static_only: bool = typer.Option(False, "--static-only"),
+) -> None:
+    """Run available real paper-16 MLIP models with structured optional-backend skips."""
+
+    static_rows = run_static_campaign(manifest, out_dir)
+    if not static_only:
+        run_chgnet_relaxation_campaign(manifest, out_dir)
+    console.print(f"[green]Wrote {len(static_rows)} MLIP static records[/green] to {out_dir}")
+
+
+@app.command("analyse-crystal")
+def analyse_crystal_cli(
+    cif: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True),
+    intent: Path | None = typer.Option(None, "--intent", exists=True, file_okay=True, dir_okay=False),
+    level: str = typer.Option("advanced", "--level"),
+    layers: Path | None = typer.Option(None, "--layers", exists=True, file_okay=True, dir_okay=False),
+    out_dir: Path = typer.Option(Path("reports/advanced_analysis"), "--out-dir"),
+) -> None:
+    """Build a unified report whose unavailable optional evidence remains explicit."""
+
+    if level.lower() != "advanced":
+        raise typer.BadParameter("Only --level advanced is currently supported")
+    intent_data = json.loads(intent.read_text(encoding="utf-8")) if intent else None
+    layer_data = json.loads(layers.read_text(encoding="utf-8")) if layers else None
+    result = analyse_crystal_advanced(cif, intent=intent_data, layers=layer_data)
+    paths = write_advanced_report(result, out_dir)
+    console.print_json(data={"scientific_quality_dimensions": result.scientific_quality_dimensions, "outputs": paths})
+
+
+@dft_app.command("backends")
+def dft_backends_cli() -> None:
+    """Report DFT adapter and executable readiness without claiming execution."""
+
+    backend = get_backend("castep")
+    console.print_json(
+        data=[
+            {
+                "backend": "castep",
+                "adapter_available": True,
+                "executable_available": backend.executable_available(),
+                "engine_version": backend.version(),
+                "status": "READY" if backend.executable_available() else "BLOCKED_ENVIRONMENT",
+            }
+        ]
+    )
+
+
+@dft_app.command("prepare")
+def dft_prepare_cli(
+    manifest: Path = typer.Option(..., "--manifest", exists=True, file_okay=True, dir_okay=False),
+    backend: str = typer.Option(..., "--backend"),
+    config: Path = typer.Option(..., "--config", exists=True, file_okay=True, dir_okay=False),
+    out_dir: Path = typer.Option(..., "--out-dir"),
+    slurm_config: Path | None = typer.Option(None, "--slurm-config", exists=True, file_okay=True, dir_okay=False),
+) -> None:
+    """Prepare reproducible external-engine inputs without launching calculations."""
+
+    try:
+        prepared = prepare_manifest(manifest, backend, config, out_dir, slurm_config_path=slurm_config)
+    except Exception as exc:
+        raise ClickException(str(exc)) from exc
+    console.print_json(data={"status": "PREPARED", "calculations": [str(path) for path in prepared]})
+
+
+@dft_app.command("submit")
+def dft_submit_cli(
+    calculations: Path = typer.Option(..., "--calculations", exists=True, file_okay=False, dir_okay=True),
+) -> None:
+    """Submit prepared calculations through Slurm and persist real returned job IDs."""
+
+    rows = submit_prepared(calculations)
+    console.print_json(data=[row.model_dump(mode="json") for row in rows])
+
+
+@dft_app.command("status")
+def dft_status_cli(
+    calculations: Path = typer.Option(..., "--calculations", exists=True, file_okay=False, dir_okay=True),
+    json_out: Path | None = typer.Option(None, "--json"),
+) -> None:
+    """Normalize Slurm states without inferring convergence."""
+
+    rows = status_prepared(calculations)
+    data = [row.model_dump(mode="json") for row in rows]
+    if json_out:
+        write_dft_json(json_out, {"rows": data})
+    console.print_json(data=data)
+
+
+@dft_app.command("collect")
+def dft_collect_cli(
+    calculations: Path = typer.Option(..., "--calculations", exists=True, file_okay=False, dir_okay=True),
+    out_dir: Path = typer.Option(..., "--out-dir"),
+) -> None:
+    """Parse backend outputs into structured DFT results and failures."""
+
+    rows = collect_results(calculations, out_dir)
+    console.print_json(data={"rows": len(rows), "out_dir": str(out_dir)})
 
 
 @app.command("list-benchmark-protocols")

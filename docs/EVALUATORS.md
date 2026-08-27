@@ -149,3 +149,14 @@ The local reference file should include `formula` and
 include `predicted_energy_above_hull`, `hull_reference_count`, `hull_ok`, and
 `decomposition_products`. These values are predicted/surrogate hull metrics
 unless the supplied energies are real DFT energies.
+
+# Advanced energetic and DFT evaluators
+
+`relaxation_intent_retention` is registered in the standard evaluator registry. It compares a
+generated CIF with its own relaxed CIF; it is not reference-crystal matching. Genuine DFT
+formation and hull analysis live under `sca.dft.analysis` because they consume compatible energy
+sets rather than one crystal row. The existing `predicted_hull` evaluator remains explicitly
+surrogate-only.
+
+MLIP ensemble agreement uses campaign-level within-model ranks. Per-row evaluation reports when
+rank context is required and never averages raw energies from unrelated MLIP models.

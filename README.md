@@ -268,10 +268,33 @@ export SCA_ALIGNN_COMMAND="python -m alignn.scripts.pretrained --model {model} -
 
 `select-top-k` sorts by `pre_dft_rank_score` within each requested group and writes selected rows only, setting `selected_for_dft=true` in the output. Lower scores are better. Failed parses, formula mismatches, bad contacts, geometry failures, multiplicity inconsistencies, and duplicate non-representatives are penalized.
 
+## Advanced energetic and DFT validation
+
+SCA now provides an explicit orchestration layer from immutable generated CIFs through multi-MLIP
+screening/relaxation, post-relaxation validation, reproducible CASTEP preparation, Slurm lifecycle,
+DFT collection, compatible formation energy, and a distinct compatible-DFT convex hull.
+
+```powershell
+python -m sca.cli validate-paper16-manifest
+python -m sca.cli build-paper16-baseline
+python -m sca.cli verify-backends --json reports/backend_readiness.json
+python -m sca.cli dft --help
+python -m sca.cli analyse-crystal candidate.cif --level advanced
+```
+
+See [Advanced Crystal Analysis](docs/ADVANCED_CRYSTAL_ANALYSIS.md),
+[MLIP Relaxation Validation](docs/MLIP_RELAXATION_VALIDATION.md),
+[DFT Workflow](docs/DFT_WORKFLOW.md), [DFT Energy Contract](docs/DFT_ENERGY_CONTRACT.md), and
+[Hull Analysis](docs/HULL_ANALYSIS.md).
+
+SPP score is not physical energy; ALIGNN formation energy is not DFT; MLIP energy is not DFT
+energy; MLIP or DFT relaxation is not proof of thermodynamic stability; DFT relaxation is not
+E_hull; and E_hull is not experimental synthesizability.
+
 ## Roadmap
 
 - CHGNet and M3GNet surrogate evaluators
 - richer pymatgen validity checks
 - configurable novelty corpora
 - optional Materials Project integration
-- hull analysis after real DFT data exists
+- additional DFT engine adapters and real compatible reference bundles

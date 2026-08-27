@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from importlib import import_module
 from pathlib import Path
-from statistics import mean, pstdev
 from typing import Any
 
 from sca.evaluators.cif_parse import parse_cif
@@ -90,10 +89,10 @@ class SevenNetStaticBenchmarkEvaluator:
 
 class MlipEnsembleBenchmarkEvaluator:
     name = "mlip_ensemble"
-    description = "Consensus and disagreement metrics across available MLIP energy columns."
+    description = "Declares per-row MLIP availability; cross-candidate rank consensus is campaign-level."
 
     def evaluate_row(self, row: dict) -> BenchmarkEvaluatorResult:
-        energies = []
+        models_available = []
         for key in (
             "formation_energy_per_atom",
             "alignn_formation_energy_per_atom",
@@ -104,41 +103,35 @@ class MlipEnsembleBenchmarkEvaluator:
         ):
             value = _float_or_none(row.get(key))
             if value is not None:
-                energies.append(value)
-        if len(energies) < 2:
-            return BenchmarkEvaluatorResult(
-                name=self.name,
-                ok=False,
-                skipped=True,
-                summary="insufficient models",
-                metrics={
-                    "mlip_energy_mean": mean(energies) if energies else None,
-                    "mlip_energy_std": None,
-                    "mlip_rank_mean": None,
-                    "mlip_rank_variance": None,
-                    "mlip_disagreement_flag": None,
-                    "mlip_consensus_stable_flag": None,
-                },
-            )
-        energy_mean = mean(energies)
-        energy_std = pstdev(energies)
-        disagreement = energy_std > float(os.environ.get("SCA_MLIP_DISAGREEMENT_THRESHOLD", "0.5"))
+                models_available.append(key.removesuffix("_energy_per_atom"))
+        enough = len(models_available) >= 2
+        label = "RANK_ANALYSIS_REQUIRED" if enough else "INSUFFICIENT_MODELS"
         return BenchmarkEvaluatorResult(
             name=self.name,
-            ok=True,
-            summary="ok",
+            ok=enough,
+            skipped=not enough,
+            summary=label,
             metrics={
-                "mlip_energy_mean": energy_mean,
-                "mlip_energy_std": energy_std,
-                "mlip_rank_mean": None,
-                "mlip_rank_variance": None,
-                "mlip_disagreement_flag": disagreement,
-                "mlip_consensus_stable_flag": energy_mean < 0 and not disagreement,
+                # Backward-compatible identity for a single model, not a cross-model average.
+                "mlip_energy_mean": (
+                    _float_or_none(row.get(f"{models_available[0]}_energy_per_atom"))
+                    if len(models_available) == 1
+                    else None
+                ),
+                "mlip_energy_std": None,
+                "models_available": models_available,
+                "model_success_count": len(models_available),
+                "energy_rank_consensus": None,
+                "energy_rank_variance": None,
+                "force_rank_consensus": None,
+                "mlip_disagreement_flag": None,
+                "mlip_consensus_label": label,
+                "mlip_ensemble_explanation": (
+                    "Requires within-model ranks across a candidate campaign; raw model energies "
+                    "are not averaged because their energy conventions are not calibrated."
+                ),
             },
-            flags={
-                "mlip_disagreement_flag": disagreement,
-                "mlip_consensus_stable_flag": energy_mean < 0 and not disagreement,
-            },
+            flags={"mlip_disagreement_flag": None},
         )
 
 
@@ -163,7 +156,15 @@ def _ase_calculator_result(
         atoms = AseAtomsAdaptor.get_atoms(structure)
         atoms.calc = calculator
         energy_per_atom = float(atoms.get_potential_energy()) / len(atoms)
-        forces_max = _extract_forces_max({"forces": atoms.get_forces()})
+        forces = atoms.get_forces()
+        forces_max = _extract_forces_max({"forces": forces})
+        force_norms = [float(sum(component * component for component in row) ** 0.5) for row in forces]
+        forces_mean = sum(force_norms) / len(force_norms) if force_norms else None
+        try:
+            stress = atoms.get_stress(voigt=False)
+            stress_norm = float(sum(float(value) ** 2 for row in stress for value in row) ** 0.5)
+        except Exception:
+            stress_norm = None
     except ModuleNotFoundError as exc:
         return _mlip_result(name, prefix, False, "unavailable", str(exc), type(exc).__name__, skipped=True, details=details)
     except KeyError as exc:
@@ -183,6 +184,8 @@ def _ase_calculator_result(
         model=model_label,
         energy_per_atom=energy_per_atom,
         forces_max=forces_max,
+        forces_mean=forces_mean,
+        stress_norm=stress_norm,
         details=details,
     )
 
@@ -491,6 +494,8 @@ def _mlip_result(
     model: str | None = None,
     energy_per_atom: float | None = None,
     forces_max: float | None = None,
+    forces_mean: float | None = None,
+    stress_norm: float | None = None,
     details: dict[str, Any] | None = None,
 ) -> BenchmarkEvaluatorResult:
     return BenchmarkEvaluatorResult(
@@ -504,6 +509,8 @@ def _mlip_result(
             f"{prefix}_model": model,
             f"{prefix}_energy_per_atom": energy_per_atom,
             f"{prefix}_forces_max": forces_max,
+            f"{prefix}_forces_mean": forces_mean,
+            f"{prefix}_stress_norm": stress_norm,
             f"{prefix}_error": error_message,
         },
         flags={f"{prefix}_ok": ok},

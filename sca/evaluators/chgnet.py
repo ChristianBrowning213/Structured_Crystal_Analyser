@@ -39,6 +39,8 @@ class ChgnetStaticBenchmarkEvaluator:
             prediction = model.predict_structure(structure)
             energy_per_atom = _extract_energy_per_atom(prediction, len(structure))
             forces_max = _extract_forces_max(prediction)
+            forces_mean = _extract_forces_mean(prediction)
+            stress_norm = _extract_stress_norm(prediction)
         except Exception as exc:
             return _result(
                 ok=False,
@@ -53,6 +55,8 @@ class ChgnetStaticBenchmarkEvaluator:
             model=getattr(model, "__class__", type(model)).__name__,
             energy_per_atom=energy_per_atom,
             forces_max=forces_max,
+            forces_mean=forces_mean,
+            stress_norm=stress_norm,
         )
 
 
@@ -70,6 +74,8 @@ def _result(
     model: str | None = None,
     energy_per_atom: float | None = None,
     forces_max: float | None = None,
+    forces_mean: float | None = None,
+    stress_norm: float | None = None,
     error_type: str | None = None,
     error_message: str | None = None,
     skipped: bool = False,
@@ -85,6 +91,8 @@ def _result(
             "chgnet_model": model,
             "chgnet_energy_per_atom": energy_per_atom,
             "chgnet_forces_max": forces_max,
+            "chgnet_forces_mean": forces_mean,
+            "chgnet_stress_norm": stress_norm,
             "chgnet_error": error_message,
         },
         flags={"chgnet_ok": ok},
@@ -94,13 +102,13 @@ def _result(
 
 
 def _extract_energy_per_atom(prediction: Any, n_sites: int) -> float | None:
-    value = _lookup(prediction, ("e", "energy", "energy_per_atom"))
+    value = _lookup(prediction, ("energy_per_atom", "e", "energy"))
     if value is None:
         return None
     scalar = _as_float(value)
     if scalar is None:
         return None
-    if _has_key(prediction, "energy_per_atom"):
+    if _has_key(prediction, "energy_per_atom") or _has_key(prediction, "e"):
         return scalar
     return scalar / n_sites if n_sites else scalar
 
@@ -118,6 +126,32 @@ def _extract_forces_max(prediction: Any) -> float | None:
         if row
     ]
     return max(norms) if norms else None
+
+
+def _extract_forces_mean(prediction: Any) -> float | None:
+    forces = _lookup(prediction, ("f", "forces"))
+    rows = _to_rows(forces) if forces is not None else []
+    norms = [math.sqrt(sum(component * component for component in row)) for row in rows if row]
+    return sum(norms) / len(norms) if norms else None
+
+
+def _extract_stress_norm(prediction: Any) -> float | None:
+    stress = _lookup(prediction, ("s", "stress"))
+    if stress is None:
+        return None
+    if hasattr(stress, "detach"):
+        stress = stress.detach()
+    if hasattr(stress, "cpu"):
+        stress = stress.cpu()
+    if hasattr(stress, "tolist"):
+        stress = stress.tolist()
+    values = []
+    for value in stress:
+        if isinstance(value, list | tuple):
+            values.extend(float(component) for component in value)
+        else:
+            values.append(float(value))
+    return math.sqrt(sum(value * value for value in values)) if values else None
 
 
 def _lookup(prediction: Any, keys: tuple[str, ...]) -> Any:
@@ -162,4 +196,3 @@ def _to_rows(value: Any) -> list[list[float]]:
         except TypeError:
             continue
     return rows
-
