@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sca"
-version = "0.1.0"
-description = "Structured Crystal Analyser: internal tools for evaluating crystal structures."
+version = "0.1.1"
+description = "Structured Crystal Analyser tools for evaluating crystal structures."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
