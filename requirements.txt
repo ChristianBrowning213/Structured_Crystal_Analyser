@@ -1,3 +1,4 @@
+click>=8.0
 pandas>=2.0
 pydantic>=2.0
 pymatgen>=2024.0
